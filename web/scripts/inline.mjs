@@ -69,6 +69,7 @@ html = html.replace(
 // ── Error reporter + startup watchdog (shows the problem instead of a blank screen) ──
 const errorOverlay = `<script>
 (function () {
+  var firstError = null;
   function errBox(msg) {
     try {
       var d = document.createElement('div');
@@ -79,17 +80,26 @@ const errorOverlay = `<script>
     } catch (e) {}
   }
   window.addEventListener('error', function (e) {
-    errBox('خطای برنامه: ' + (e.message || 'خطای ناشناخته') + (e.filename ? ' (' + e.filename.split('/').pop() + ')' : ''));
+    var m = (e && e.message) || 'خطای ناشناخته';
+    if (!firstError) firstError = m + (e && e.filename ? ' (' + e.filename.split('/').pop() + ')' : '');
+    errBox('خطای برنامه: ' + m + (e && e.filename ? ' (' + e.filename.split('/').pop() + ')' : ''));
   });
   window.addEventListener('unhandledrejection', function (e) {
-    var r = e.reason;
-    errBox('خطای ناهمگام: ' + (r && r.message ? r.message : String(r)));
+    var r = e && e.reason;
+    var m = (r && r.message) ? r.message : String(r);
+    if (!firstError) firstError = m;
+    errBox('خطای ناهمگام: ' + m);
   });
   setTimeout(function () {
     try {
       var root = document.getElementById('root');
       if (!root || root.childElementCount === 0) {
-        errBox('محتوای برنامه بارگذاری نشد (صفحه سفید). لطفاً از این پیام اسکرین‌شات بگیرید.');
+        var details = 'جزئیات: ';
+        details += 'body.children=' + (document.body ? document.body.children.length : '?');
+        details += ', root=' + (root ? 'خالی' : 'وجود ندارد');
+        details += ', نخستین‌خطا=' + (firstError ? firstError : 'ثبت‌نشده');
+        if (window.__LAST_ERROR) { try { details += ', آخرین‌خطا=' + window.__LAST_ERROR; } catch (e) {} }
+        errBox('محتوای برنامه بارگذاری نشد (صفحه سفید). ' + details);
       }
     } catch (e) {}
   }, 8000);

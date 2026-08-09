@@ -14,6 +14,18 @@ import { Toaster } from 'react-hot-toast';
 export function App() {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
 
+  // Small version badge (helps troubleshooting which APK build is installed)
+  const VERSION = '2.1';
+  React.useEffect(() => {
+    try {
+      const b = document.createElement('div');
+      b.style.cssText =
+        'position:fixed;top:2px;left:4px;z-index:2147483646;font:10px/1.4 Tahoma,sans-serif;color:rgba(0,229,255,.35);pointer-events:none;direction:ltr;letter-spacing:.5px';
+      b.textContent = 'v' + VERSION;
+      document.body.appendChild(b);
+    } catch (e) {}
+  }, []);
+
   return (
     <AuthProvider>
       <HashRouter>

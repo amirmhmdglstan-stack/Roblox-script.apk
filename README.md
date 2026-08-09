@@ -41,9 +41,23 @@ Full details, customization options and troubleshooting:
 
 ## 🔄 Updating the app after changing the website
 
-1. `cd web && npm install && npm run build`
-2. Copy everything from `web/dist/` into `app/src/main/assets/www/`
-3. Rebuild the APK in Android Studio.
+The APK contains the whole app as ONE self-contained file
+(`app/src/main/assets/www/index.html`) — CSS + JS are inlined into it, so it
+works when loaded straight from the APK on any Android device.
+
+1. `cd web && npm install`
+2. `npm run build:apk` — builds the site AND writes the single-file app
+   directly into `app/src/main/assets/www/`
+3. Rebuild the APK in Android Studio (or push — the cloud build does it).
+
+## 🧪 Automatic testing (optional)
+
+The repo includes a **smoke test** (`web/tests/smoke.mjs`) that loads the
+bundled app from `file://` in headless Chromium and checks that it actually
+renders — catching blank-screen bugs before you install anything.
+Run it locally: `npm i playwright && npx playwright install chromium && node web/tests/smoke.mjs`
+The CI workflow (`workflow/build-apk.yml`) runs it automatically before every
+build once enabled (see the guide).
 
 ## 🤖 Optional: auto-build the APK with GitHub Actions
 

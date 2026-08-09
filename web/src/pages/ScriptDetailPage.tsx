@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+import { copyToClipboard } from '../lib/clipboard';
 import { Script, ReactionType } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { ReportModal } from '../components/scripts/ReportModal';
@@ -127,19 +128,27 @@ export const ScriptDetailPage: React.FC<{ onOpenAuthModal: () => void }> = ({ on
   }, [fetchScriptDetail]);
 
   // Handle Copy to Clipboard
-  const handleCopyCode = () => {
+  const handleCopyCode = async () => {
     if (!script) return;
-    navigator.clipboard.writeText(script.script_content);
-    setCopied(true);
-    toast.success('کد اسکریپت در حافظه کپی شد!');
-    setTimeout(() => setCopied(false), 2500);
+    const ok = await copyToClipboard(script.script_content);
+    if (ok) {
+      setCopied(true);
+      toast.success('کد اسکریپت در حافظه کپی شد!');
+      setTimeout(() => setCopied(false), 2500);
+    } else {
+      toast.error('کپی در این دستگاه پشتیبانی نمی‌شود');
+    }
   };
 
   // Handle Share Link
-  const handleShare = () => {
+  const handleShare = async () => {
     const url = window.location.href;
-    navigator.clipboard.writeText(url);
-    toast.success('لینک اسکریپت کپی شد! اکنون می‌توانید با دوستانتان به اشتراک بگذارید.');
+    const ok = await copyToClipboard(url);
+    if (ok) {
+      toast.success('لینک اسکریپت کپی شد! اکنون می‌توانید با دوستانتان به اشتراک بگذارید.');
+    } else {
+      toast.error('کپی در این دستگاه پشتیبانی نمی‌شود');
+    }
   };
 
   // Handle Like/Dislike reaction logic: one reaction per user, toggle removes, opposite switches

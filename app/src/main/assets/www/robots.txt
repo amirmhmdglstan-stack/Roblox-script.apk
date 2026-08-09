@@ -1,3 +1,0 @@
-User-agent: *
-Allow: /
-Sitemap: https://roblox-script.onrender.com/sitemap.xml

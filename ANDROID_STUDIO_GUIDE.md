@@ -166,26 +166,21 @@ your `Roblox-Script` repo, plus the two config files that were missing —
 `vite.config.ts` and `tailwind.config.js` — so it can actually build).
 
 1. Install Node.js (<https://nodejs.org>).
-2. Build the site:
+2. Build the site **and** refresh the bundled app in one command:
 
 ```bash
 cd web
 npm install
-npm run build      # creates web/dist
+npm run build:apk   # builds + writes the single-file app into app/src/main/assets/www/
 ```
 
-3. Replace the bundled copy:
+3. Rebuild the APK in Android Studio (section 5).
 
-```bash
-# from the repo root:
-cp -r web/dist/* app/src/main/assets/www/
-```
-
-4. Rebuild the APK in Android Studio (section 5).
-
-> Note: the Supabase URL + anon key are baked in at build time.
-> They're in `web/.env` (copy `web/.env.example` → `.env` first).
-> You can find your values in `env.txt` of the original Roblox-Script repo.
+> The APK contains the app as ONE self-contained `index.html` (CSS + JS
+> inlined) so nothing can fail to load from the APK file.
+> The Supabase URL + anon key are baked in at build time — they're in
+> `web/.env` (copy `web/.env.example` → `.env` first; your values are in
+> `env.txt` of the original Roblox-Script repo).
 
 ---
 
@@ -197,11 +192,17 @@ Enable it once from the GitHub website (takes 30 seconds):
 1. Open your repo on GitHub → **Add file → Create new file**.
 2. Name it exactly: `.github/workflows/build-apk.yml`
 3. Paste the content of `workflow/build-apk.yml` → **Commit**.
-4. From then on, every push builds the APK in the cloud. Open the
+4. From then on, every push **tests the app** (loads it from `file://` in
+   headless Chromium — if the screen would be blank, the build fails instead
+   of you finding out on your phone) and builds the APK in the cloud. Open the
    **Actions** tab → latest run → download the **Roblox-Script-APK** artifact
    (it's `app-debug.apk` inside).
 5. To get a downloadable release: create a tag (`Releases → Create a new
    release → Choose a tag → v1.0`). The workflow attaches the APK to the release.
+
+> If you already enabled the workflow earlier, update it once: open your
+> `.github/workflows/build-apk.yml` on GitHub → paste the new content of
+> `workflow/build-apk.yml` → commit. (Adds the automatic smoke test.)
 
 ---
 
@@ -211,7 +212,7 @@ Enable it once from the GitHub website (takes 30 seconds):
 |---|---|
 | Gradle sync fails | Check internet. `File → Invalidate Caches… → Invalidate and Restart`. Make sure Gradle JDK is 17+ (Settings → Build Tools → Gradle). |
 | "SDK location not found" | Settings → Appearance & Behavior → System Settings → Android SDK → install **Android 14 (API 34)** platform + Build-Tools, then sync again. |
-| App opens but is blank/white, or shows "Webpage not available" | You're running an **old build**. This was a bug in earlier versions of the project. **Update the project code** (re-download the ZIP from the branch, or `git pull`), rebuild the APK, uninstall the old app from your phone, and install the new one. The current version loads everything straight from the APK file and works on all devices. |
+| App opens but is blank/white | You're running an **old build**. Re-download the latest code (ZIP from the branch, or `git pull`), rebuild, uninstall the old app, install the new one. The current version is a single self-contained file (no ES modules, no special hosts) and loads on every device. If it ever happens again, the app now shows the actual error message in a red box at the bottom of the screen — screenshot it and share it. |
 | Login fails | Your Supabase free project may be **paused** (free tier pauses after ~1 week of inactivity) — open the Supabase dashboard and *Restore project*. |
 | "App not installed" | A previous install used a different signature — uninstall the old app first. |
 | Persian fonts look wrong | Fonts (Vazirmatn) load from Google Fonts on first open — they need internet once, then are cached. |

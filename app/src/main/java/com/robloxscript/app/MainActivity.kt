@@ -1,26 +1,35 @@
 package com.robloxscript.app
 
 import android.annotation.SuppressLint
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.view.View
+import android.webkit.JavascriptInterface
+import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.ProgressBar
+import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 
 /**
  * Roblox Script — Android app.
  *
- * The whole application (React UI + all its logic) is bundled INSIDE the APK
- * under `app/src/main/assets/www` and loaded straight from the APK file via
- * file:///android_asset/www/index.html. No server, no special host, no network
- * tricks — so it works on every Android device and even opens offline.
+ * The WHOLE application (React UI + all its logic) is bundled INSIDE the APK
+ * as a single self-contained file (`app/src/main/assets/www/index.html`) and
+ * loaded straight from the APK file via file:///android_asset/www/index.html.
+ * No server, no special host, no ES modules, nothing that can fail — the app
+ * opens even with airplane mode on.
  *
  * Only live content needs internet, exactly like the website itself:
  *   - scripts & users        -> your Supabase database
@@ -45,6 +54,36 @@ class MainActivity : AppCompatActivity() {
     private lateinit var webView: WebView
     private lateinit var progressBar: ProgressBar
 
+    /** Pending file-chooser callback (upload thumbnail in the app). */
+    private var filePathCallback: ValueCallback<Array<Uri>>? = null
+
+    private val fileChooserLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            val results = if (result.resultCode == RESULT_OK && result.data != null) {
+                arrayOf(result.data!!.data!!)
+            } else {
+                null
+            }
+            filePathCallback?.onReceiveValue(results)
+            filePathCallback = null
+        }
+
+    /**
+     * Exposed to the app as `window.AndroidBridge.copyToClipboard(text)`.
+     * The web app uses this first (it works on file:// pages, unlike the
+     * browser clipboard API), then falls back to the standard API.
+     */
+    inner class AndroidBridge {
+        @JavascriptInterface
+        fun copyToClipboard(text: String) {
+            val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            cm.setPrimaryClip(ClipData.newPlainText("Roblox Script", text))
+            runOnUiThread {
+                Toast.makeText(this@MainActivity, "کپی شد", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -67,6 +106,9 @@ class MainActivity : AppCompatActivity() {
             // Remove the "; wv" marker so the site can't tell this is a WebView
             userAgentString = userAgentString.replace("; wv", "")
         }
+
+        // Native clipboard for the app's copy buttons
+        webView.addJavascriptInterface(AndroidBridge(), "AndroidBridge")
 
         webView.webViewClient = object : WebViewClient() {
 
@@ -108,9 +150,58 @@ class MainActivity : AppCompatActivity() {
         }
 
         webView.webChromeClient = object : WebChromeClient() {
+
             override fun onProgressChanged(view: WebView?, newProgress: Int) {
                 progressBar.progress = newProgress
                 progressBar.visibility = if (newProgress >= 100) View.GONE else View.VISIBLE
+            }
+
+            // Make window.confirm() work properly (without this, confirmations
+            // are silently cancelled and delete buttons would do nothing)
+            override fun onJsConfirm(
+                view: WebView?,
+                url: String?,
+                message: String?,
+                result: android.webkit.JsResult
+            ): Boolean {
+                AlertDialog.Builder(this@MainActivity)
+                    .setMessage(message ?: "")
+                    .setPositiveButton("بله") { _, _ -> result.confirm() }
+                    .setNegativeButton("خیر") { _, _ -> result.cancel() }
+                    .setOnCancelListener { result.cancel() }
+                    .show()
+                return true
+            }
+
+            // Show alert() messages as a toast
+            override fun onJsAlert(
+                view: WebView?,
+                url: String?,
+                message: String?,
+                result: android.webkit.JsResult
+            ): Boolean {
+                Toast.makeText(this@MainActivity, message ?: "", Toast.LENGTH_LONG).show()
+                result.confirm()
+                return true
+            }
+
+            // Make <input type="file"> (thumbnail upload) open the phone's file picker
+            override fun onShowFileChooser(
+                webView: WebView?,
+                filePathCallback: ValueCallback<Array<Uri>>?,
+                fileChooserParams: FileChooserParams?
+            ): Boolean {
+                this@MainActivity.filePathCallback?.onReceiveValue(null)
+                this@MainActivity.filePathCallback = filePathCallback
+                val intent = fileChooserParams?.createIntent()
+                    ?: Intent(Intent.ACTION_GET_CONTENT).apply { type = "*/*" }
+                try {
+                    fileChooserLauncher.launch(intent)
+                    return true
+                } catch (e: Exception) {
+                    this@MainActivity.filePathCallback = null
+                    return false
+                }
             }
         }
 

@@ -10,5 +10,14 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: false,
+    // WebViews cannot execute ES-module scripts from file:// URLs (CORS).
+    // A classic IIFE script runs everywhere, even on older Android WebViews.
+    target: 'es2017',
+    rollupOptions: {
+      output: {
+        format: 'iife',
+        inlineDynamicImports: true,
+      },
+    },
   },
 });

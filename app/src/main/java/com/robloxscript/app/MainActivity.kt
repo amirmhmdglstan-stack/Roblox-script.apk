@@ -74,6 +74,12 @@ class MainActivity : AppCompatActivity() {
         private const val AI_MAX_HISTORY = 12
         private const val AI_MIN_INTERVAL_MS = 3000L   // simple per-device rate limit
         private const val AI_CONTEXT_TTL_MS = 300_000L // site context cached 5 min
+        private const val PING_TIMEOUT_MS = 4000
+        private const val JUDGE_TIMEOUT_MS = 8000
+        private const val ANSWER_TIMEOUT_MS = 30_000
+        private const val MAX_ANSWER_ATTEMPTS = 10
+        private const val HEALTH_TTL_MS = 60_000L
+        private const val AI_MAX_RATE_PER_MIN = 12
 
         private val HAMYAR_SYSTEM_PROMPT = """تو «همیار»، دستیار هوشمند وب‌سایت فارسی «Roblox Script» هستی؛ پلتفرمی برای اشتراک‌گذاری اسکریپت‌های روبلاکس و بخش وضعیت اکسپلویت‌ها.
 قوانین پاسخ‌گویی:
@@ -97,6 +103,14 @@ class MainActivity : AppCompatActivity() {
     private var aiContextCache: Pair<Long, String>? = null
     private var lastAiCallMs = 0L
     @Volatile private var destroyed = false
+
+    // AI provider pool — mirrors server.js (loaded from assets/ai_config.json)
+    private var aiConfig = JSONObject()
+    private var aiModels = JSONArray()
+    private var aiRankedModels = JSONArray()
+    private var aiHealthCheckedAt = 0L
+    private var aiLastPoolKey = ""
+    private val aiCallTimes = ArrayList<Long>()
 
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
     private val fileChooserLauncher =
@@ -201,6 +215,8 @@ class MainActivity : AppCompatActivity() {
                 .lastOrNull { it?.optString("role") == "user" }
                 ?.optString("content") ?: ""
 
+            if (!aiRateOk()) return """{"error":"RATE_LIMITED"}"""
+
             val reply = askProviders(full, lastUser) ?: return """{"error":"AI_UNAVAILABLE"}"""
             JSONObject().put("reply", reply).toString()
         } catch (e: Exception) {
@@ -208,43 +224,139 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** Tries providers in order; returns the first successful text reply. */
-    private fun askProviders(fullMessages: JSONArray, lastUserText: String): String? {
-        // 1) Pollinations — free tier, OpenAI-compatible (referrer helps fair use)
-        try {
+    // ── server.js-equivalent smart AI pool ────────────────────────────────────
+
+    private val imageWords = listOf(
+        "draw", "paint", "sketch", "illustrate", "render", "generate an image",
+        "generate a picture", "create an image", "make an image", "create a picture",
+        "a picture of", "عکس", "تصویر", "نقاشی", "بکش", "طراحی", "بکشید"
+    )
+
+    private fun wantsImage(text: String): Boolean {
+        val t = text.lowercase()
+        return imageWords.any { t.contains(it) }
+    }
+
+    private fun providerBase(name: String): String {
+        val p = aiConfig.optJSONObject("providers")?.optJSONObject(name) ?: return ""
+        return p.optString("base")
+    }
+
+    private fun providerKey(name: String): String {
+        val p = aiConfig.optJSONObject("providers")?.optJSONObject(name) ?: return ""
+        return p.optString("key")
+    }
+
+    private fun modelUrl(provider: String): String {
+        val base = providerBase(provider)
+        return when (provider) {
+            "g4f" -> base + "/chat/completions"
+            "pollinations" -> base + "/v1/chat/completions"
+            "huggingface" -> base + "/chat/completions"
+            "openrouter" -> base + "/chat/completions"
+            else -> ""
+        }
+    }
+
+    /** One OpenAI-compatible call; returns the trimmed content or null. */
+    private fun callModel(modelId: String, provider: String, messages: JSONArray, timeoutMs: Int): String? {
+        val url = modelUrl(provider)
+        if (url.isBlank()) return null
+        return try {
             val payload = JSONObject()
-                .put("model", "openai")
-                .put("messages", fullMessages)
+                .put("model", modelId)
+                .put("messages", messages)
                 .put("stream", false)
-            val body = postJson(
-                "https://gen.pollinations.ai/v1/chat/completions?referrer=roblox-script-app",
-                payload, 20_000
+                .put("max_tokens", 500)
+            val headers = HashMap<String, String>()
+            headers["Content-Type"] = "application/json"
+            providerKey(provider).takeIf { it.isNotBlank() }?.let {
+                headers["Authorization"] = "Bearer $it"
+            }
+            val body = postJsonWithHeaders(url, payload, headers, timeoutMs) ?: return null
+            parseChatReply(body)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** Step 1 — ping every model; keep the responders. */
+    private fun healthCheck(): JSONArray {
+        val ok = JSONArray()
+        for (i in 0 until aiModels.length()) {
+            val m = aiModels.optJSONObject(i) ?: continue
+            val ping = JSONArray().put(
+                JSONObject().put("role", "user").put("content", "hi")
             )
-            val reply = parseChatReply(body)
-            if (reply != null) return reply
-        } catch (e: Exception) { /* next */ }
+            val r = callModel(m.optString("id"), m.optString("provider"), ping, PING_TIMEOUT_MS)
+            if (r != null) ok.put(m)
+        }
+        return ok
+    }
 
-        // 2) g4f.space public proxy
-        try {
-            val payload = JSONObject()
-                .put("model", "gpt-4o-mini")
-                .put("messages", fullMessages)
-                .put("stream", false)
-            val body = postJson("https://g4f.space/v1/chat/completions", payload, 20_000)
-            val reply = parseChatReply(body)
-            if (reply != null) return reply
-        } catch (e: Exception) { /* next */ }
+    /** Step 2 — one random available model ranks the pool (fallback: shuffle). */
+    private fun rankByJudge(available: JSONArray): JSONArray {
+        if (available.length() <= 1) return available
+        val judge = available.optJSONObject((Math.random() * available.length()).toInt())
+        val names = ArrayList<String>()
+        for (i in 0 until available.length()) names.add(available.optJSONObject(i).optString("id"))
+        val sys = "You are an objective AI-model quality judge. I will give you a list of AI model identifiers. " +
+            "Order them from most capable/highest quality to least capable. Output ONLY a numbered list, " +
+            "one identifier per line, most capable first. No explanations, no extra text."
+        val msgs = JSONArray()
+            .put(JSONObject().put("role", "system").put("content", sys))
+            .put(JSONObject().put("role", "user").put("content", "Models:\n" + names.mapIndexed { i, n -> "${i + 1}. $n" }.joinToString("\n")))
+        val judgeContent = callModel(judge.optString("id"), judge.optString("provider"), msgs, JUDGE_TIMEOUT_MS)
+        val order = ArrayList<String>()
+        if (judgeContent != null) {
+            for (line in judgeContent.split("\n")) {
+                val id = line.replace(Regex("^\\d+[.)\\s]*"), "").replace(Regex("^[-*]\\s*"), "").trim()
+                if (names.contains(id) && !order.contains(id)) order.add(id)
+            }
+        }
+        for (n in names) if (!order.contains(n)) order.add(n)
+        val ranked = JSONArray()
+        for (id in order) {
+            for (i in 0 until available.length()) {
+                val m = available.optJSONObject(i)
+                if (m.optString("id") == id) { ranked.put(m); break }
+            }
+        }
+        return if (ranked.length() > 0) ranked
+        else JSONArray(available.toList().shuffled())
+    }
 
-        // 3) Pollinations simple text endpoint (single-turn plain text)
-        if (lastUserText.isNotBlank()) {
-            try {
-                val url = "https://text.pollinations.ai/" + Uri.encode(lastUserText) +
-                    "?model=openai&referrer=roblox-script-app"
-                val body = getJson(url, emptyMap(), 20_000)
-                if (!body.isNullOrBlank() && !body.trimStart().startsWith("{")) {
-                    return body.trim()
-                }
-            } catch (e: Exception) { /* give up */ }
+    private fun poolKey(models: JSONArray): String {
+        val ids = ArrayList<String>()
+        for (i in 0 until models.length()) {
+            val m = models.optJSONObject(i)
+            ids.add(m.optString("provider") + "::" + m.optString("id"))
+        }
+        return ids.sorted().joinToString("|")
+    }
+
+    /** Refresh the ranked model pool (cached 1 minute, mirrors server.js). */
+    private fun refreshPool(force: Boolean): JSONArray {
+        if (!force && System.currentTimeMillis() - aiHealthCheckedAt < HEALTH_TTL_MS && aiRankedModels.length() > 0) {
+            return aiRankedModels
+        }
+        aiHealthCheckedAt = System.currentTimeMillis()
+        val pool = healthCheck()
+        if (pool.length() == 0) return aiRankedModels // keep old ranking if all down
+        val key = poolKey(pool)
+        if (key != aiLastPoolKey || aiRankedModels.length() == 0) {
+            aiRankedModels = rankByJudge(pool)
+            aiLastPoolKey = key
+        }
+        return aiRankedModels
+    }
+
+    /** Try up to MAX_ANSWER_ATTEMPTS ranked models; first success wins. */
+    private fun tryAnswer(messages: JSONArray, models: JSONArray): String? {
+        for (i in 0 until minOf(models.length(), MAX_ANSWER_ATTEMPTS)) {
+            val m = models.optJSONObject(i) ?: continue
+            val r = callModel(m.optString("id"), m.optString("provider"), messages, ANSWER_TIMEOUT_MS)
+            if (r != null) return r
         }
         return null
     }
@@ -255,10 +367,38 @@ class MainActivity : AppCompatActivity() {
             val j = JSONObject(body)
             val choices = j.optJSONArray("choices")
             val content = choices?.optJSONObject(0)?.optJSONObject("message")?.optString("content")
-            content?.takeIf { it.isNotBlank() }
+            content?.takeIf { it.isNotBlank() }?.trim()
         } catch (e: Exception) {
             null
         }
+    }
+
+    /** Simple per-device rate limit: max 12 calls per 60s (like server.js). */
+    private fun aiRateOk(): Boolean {
+        val now = System.currentTimeMillis()
+        aiCallTimes.removeAll { now - it > 60_000 }
+        if (aiCallTimes.size >= AI_MAX_RATE_PER_MIN) return false
+        aiCallTimes.add(now)
+        return true
+    }
+
+    /** The full askHamyar pipeline (health -> rank -> answer -> retry once). */
+    private fun askProviders(fullMessages: JSONArray, lastUserText: String): String? {
+        // TEXT-ONLY guard (server.js refuses image requests politely)
+        if (wantsImage(lastUserText)) {
+            return "من فقط متن تولید می‌کنم و قابلیت ساخت تصویر ندارم 🙏\nولی خوشحال می‌شم درباره اسکریپت‌ها یا اکسپلویت‌های سایت راهنماییت کنم!"
+        }
+
+        var pool = refreshPool(false)
+        var ans = if (pool.length() > 0) tryAnswer(fullMessages, pool) else null
+        if (ans != null) return ans
+
+        // None answered -> force a fresh full test and retry once
+        pool = refreshPool(true)
+        ans = if (pool.length() > 0) tryAnswer(fullMessages, pool) else null
+        if (ans != null) return ans
+
+        return "در حال حاضر هیچ مدل هوش مصنوعی در دسترس نیست. کمی بعد دوباره امتحان کنید 🙏"
     }
 
     /** Builds the "live site data" context exactly like server.js buildAIContext(). */
@@ -427,7 +567,12 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun postJson(urlString: String, payload: JSONObject, timeoutMs: Int): String? {
+    private fun postJsonWithHeaders(
+        urlString: String,
+        payload: JSONObject,
+        headers: Map<String, String>,
+        timeoutMs: Int
+    ): String? {
         return try {
             val conn = URL(urlString).openConnection() as HttpURLConnection
             try {
@@ -435,6 +580,7 @@ class MainActivity : AppCompatActivity() {
                 conn.doOutput = true
                 conn.setRequestProperty("Content-Type", "application/json")
                 conn.setRequestProperty("Accept", "application/json")
+                for ((k, v) in headers) conn.setRequestProperty(k, v)
                 conn.connectTimeout = timeoutMs
                 conn.readTimeout = timeoutMs
                 conn.outputStream.use { it.write(payload.toString().toByteArray(StandardCharsets.UTF_8)) }
@@ -523,6 +669,15 @@ class MainActivity : AppCompatActivity() {
         }
 
         webView.addJavascriptInterface(AndroidBridge(), "AndroidBridge")
+
+        // Load the AI provider config (mirrors server.js PROVIDERS + CHAT_MODELS)
+        aiConfig = try {
+            assets.open("ai_config.json").bufferedReader(StandardCharsets.UTF_8).use { it.readText() }
+                .let { JSONObject(it) }
+        } catch (e: Exception) {
+            JSONObject()
+        }
+        aiModels = aiConfig.optJSONArray("models") ?: JSONArray()
 
         webView.webViewClient = object : WebViewClient() {
 

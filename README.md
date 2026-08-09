@@ -17,9 +17,18 @@ The original website's Express server also proxies third-party APIs
 (exploit statuses from WEAO, the AI assistant «همیار»). In this app those
 `/api/*` endpoints are implemented **natively inside the Android app**
 (`MainActivity.kt`), so every feature works in the APK with no server at all.
-The AI assistant is backed by multiple free providers (pollinations.ai →
-g4f.space) and is fed the live site data (top scripts, publishers, exploit
-statuses, Roblox versions) just like the website version.
+The AI assistant uses the **same provider pool as the website's server**
+(`app/src/main/assets/ai_config.json` — mirrors `PROVIDERS` + `CHAT_MODELS`
+from `server.js`): health-check → judge ranking → answer attempts → retry,
+with live site context (top scripts, publishers, exploit statuses, Roblox
+versions).
+
+### 🔑 Adding your real AI API keys
+
+Open `app/src/main/assets/ai_config.json` and fill the `key` fields of the
+providers you have keys for (g4f, pollinations, huggingface, openrouter —
+the same keys from your `ai(3).js` that you set as `AI_KEY_*` env vars on
+Render). Rebuild the APK and «همیار» will use them, just like the server.
 
 ## ✅ What's inside
 

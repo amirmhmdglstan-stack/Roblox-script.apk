@@ -208,6 +208,29 @@ Enable it once from the GitHub website (takes 30 seconds):
 
 ---
 
+## 9.6. Making the AI assistant («همیار») use your real API keys
+
+The app's AI uses the **same provider pool as your website's server**
+(`PROVIDERS` + `CHAT_MODELS` in `server.js`), configured in:
+
+```
+app/src/main/assets/ai_config.json
+```
+
+- Open that file and fill the `key` field of any providers you have keys for
+  (`g4f`, `pollinations`, `huggingface`, `openrouter`) — the same keys you set
+  as `AI_KEY_G4F` / `AI_KEY_POLLINATIONS` / `AI_KEY_HUGGINGFACE` /
+  `AI_KEY_OPENROUTER` on Render (from your `ai(3).js`).
+- Models with a provider that has no key are still tried (their free tiers),
+  so you can add keys gradually.
+- Rebuild the APK afterwards. The app then answers with those providers
+  (health-check → judge ranking → attempts → retry), exactly like `server.js`.
+
+> ⚠️ The config file is bundled into the APK, so treat it like the website's
+> env vars: it's only as private as your APK. Public anon-style keys are fine.
+
+---
+
 ## 10. Troubleshooting
 
 | Problem | Fix |

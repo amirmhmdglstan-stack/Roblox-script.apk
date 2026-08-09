@@ -1,0 +1,30 @@
+{
+  "providers": {
+    "g4f": { "base": "https://g4f.space/v1", "key": "" },
+    "pollinations": { "base": "https://gen.pollinations.ai", "key": "" },
+    "huggingface": { "base": "https://router.huggingface.co/v1", "key": "" },
+    "openrouter": { "base": "https://openrouter.ai/api/v1", "key": "" }
+  },
+  "models": [
+    { "id": "openai", "provider": "pollinations" },
+    { "id": "openai-large", "provider": "pollinations" },
+    { "id": "claude-fast", "provider": "pollinations" },
+    { "id": "gemini-search", "provider": "pollinations" },
+    { "id": "deepseek", "provider": "pollinations" },
+    { "id": "kimi", "provider": "pollinations" },
+    { "id": "gpt-4o-mini", "provider": "g4f" },
+    { "id": "gpt-4o", "provider": "g4f" },
+    { "id": "claude-3-5-sonnet", "provider": "g4f" },
+    { "id": "gemini-2.5-flash", "provider": "g4f" },
+    { "id": "deepseek-v3", "provider": "g4f" },
+    { "id": "llama-3.3-70b-versatile", "provider": "g4f" },
+    { "id": "meta-llama/llama-3.3-70b-instruct:free", "provider": "openrouter" },
+    { "id": "qwen/qwen-2.5-72b-instruct:free", "provider": "openrouter" },
+    { "id": "deepseek/deepseek-chat:free", "provider": "openrouter" },
+    { "id": "deepseek/deepseek-r1:free", "provider": "openrouter" },
+    { "id": "meta-llama/Llama-3.3-70B-Instruct", "provider": "huggingface" },
+    { "id": "Qwen/Qwen2.5-72B-Instruct", "provider": "huggingface" },
+    { "id": "meta-llama/Llama-3.1-8B-Instruct", "provider": "huggingface" },
+    { "id": "google/gemma-2-9b-it", "provider": "huggingface" }
+  ]
+}

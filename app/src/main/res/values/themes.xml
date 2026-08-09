@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark navy theme matching the original app design -->
+    <style name="Theme.RobloxScript" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/electric_500</item>
+        <item name="colorOnPrimary">@color/navy_900</item>
+        <item name="android:windowBackground">@color/navy_900</item>
+        <item name="android:statusBarColor">@color/navy_900</item>
+        <item name="android:navigationBarColor">@color/navy_900</item>
+    </style>
+</resources>

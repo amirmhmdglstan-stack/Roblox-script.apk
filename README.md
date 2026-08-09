@@ -1,1 +1,54 @@
-# Roblox-script.apk
+# Roblox Script — Android APK 📱
+
+This repository contains a complete **Android Studio project** that packages
+[**Roblox Script**](https://github.com/amirmhmdglstan-stack/Roblox-Script)
+(a Persian RTL React + Supabase community platform for Roblox scripts)
+into a native Android app (APK).
+
+The app is **not a link to the website** — the full web app is bundled inside
+the APK (`app/src/main/assets/www`) and rendered with a secure Android WebView,
+so the UI, styling, Supabase auth, uploads, search — everything — works exactly
+like the original web project, straight from your Supabase database.
+
+## ✅ What's inside
+
+```
+├── app/
+│   ├── build.gradle.kts              # Android module config
+│   └── src/main/
+│       ├── AndroidManifest.xml
+│       ├── java/com/robloxscript/app/MainActivity.kt   # WebView host activity
+│       ├── res/                       # Theme (dark navy + electric cyan), launcher icon
+│       └── assets/www/                # ⬅ the built web app (from the original project)
+├── web/                               # Full source of the web app (buildable)
+│   ├── src/                           # All React + TypeScript pages & components
+│   ├── vite.config.ts                 # (reconstructed — missing in the original repo)
+│   └── tailwind.config.js             # (reconstructed from the original design)
+├── gradle/                            # Gradle wrapper (8.9)
+├── settings.gradle.kts
+└── ANDROID_STUDIO_GUIDE.md            # ⬅ step-by-step build guide
+```
+
+## 🚀 Quick start
+
+1. Open this folder in **Android Studio** (`File → Open`).
+2. Wait for the Gradle sync to finish.
+3. `Build → Build App Bundle(s)/APK(s) → Build APK(s)`.
+4. Install `app/build/outputs/apk/debug/app-debug.apk` on your phone.
+
+Full details, customization options and troubleshooting:
+➡️ **[ANDROID_STUDIO_GUIDE.md](ANDROID_STUDIO_GUIDE.md)**
+
+## 🔄 Updating the app after changing the website
+
+1. `cd web && npm install && npm run build`
+2. Copy everything from `web/dist/` into `app/src/main/assets/www/`
+3. Rebuild the APK in Android Studio.
+
+## 📝 Notes
+
+- The app talks directly to **Supabase** (same public anon key the website uses),
+  so no backend server is required.
+- Supabase setup (`supabase_setup.sql`) lives in the original
+  [Roblox-Script](https://github.com/amirmhmdglstan-stack/Roblox-Script) repo — no changes needed here.
+- Android 7.0+ (API 24) is supported. Only the `INTERNET` permission is used.

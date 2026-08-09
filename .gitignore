@@ -1,0 +1,23 @@
+# ── Gradle / Android Studio ────────────────────────────────
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Build outputs & signing keys
+*.apk
+*.aab
+*.keystore
+*.jks
+
+# ── Web app (rebuildable source) ───────────────────────────
+web/node_modules/
+web/dist/
+web/.env
+
+# ── Misc ───────────────────────────────────────────────────
+.DS_Store

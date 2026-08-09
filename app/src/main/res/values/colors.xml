@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Colors copied from the original web project's theme -->
+    <color name="navy_900">#060B14</color>
+    <color name="navy_800">#0A1222</color>
+    <color name="dark_700">#0F1A2E</color>
+    <color name="electric_500">#00E5FF</color>
+
+    <!-- Adaptive launcher icon background -->
+    <color name="ic_launcher_background">#0A1222</color>
+</resources>

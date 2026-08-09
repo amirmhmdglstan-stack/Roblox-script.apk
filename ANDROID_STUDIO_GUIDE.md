@@ -1,0 +1,214 @@
+# 📱 Roblox Script — Android Studio Build Guide
+
+Build the **Roblox Script** website as an Android APK, step by step.
+
+**TL;DR** — Open this folder in Android Studio → wait for sync → `Build → Build App Bundle(s)/APK(s) → Build APK(s)` → install `app/build/outputs/apk/debug/app-debug.apk` on your phone.
+
+---
+
+## 1. What you are building
+
+The APK is a **WebView app** that contains your *entire* web project bundled inside it
+(`app/src/main/assets/www`). When you open the app you see the real Roblox Script
+platform — same dark/electric-cyan design, same RTL Persian UI, same Supabase
+auth, uploads, search, likes and favorites. No server is needed because the web
+app talks directly to your Supabase project (exactly like the website does).
+
+| Feature | How it works in the APK |
+|---|---|
+| Login / sign-up | Supabase email+password, same as website |
+| Scripts, search, likes, favorites | Supabase database + RLS policies (already set up by you) |
+| Thumbnail uploads | Supabase Storage bucket `script-thumbnails` |
+| Online counters | `get_online_counts` / `heartbeat_presence` RPCs |
+| Browsing without internet | ✅ bundled site loads offline (login/upload need internet) |
+| Back button | goes back inside the app (browser-style) |
+| External links | open in the phone's default browser |
+
+---
+
+## 2. Requirements
+
+- **Android Studio** — download from <https://developer.android.com/studio>
+  (any recent version: Koala, Ladybug, Meerkat, …).
+- **No separate JDK needed** — Android Studio bundles one.
+- **No Android SDK needed manually** — Android Studio installs it on first sync.
+- A phone with **Android 7.0+ (API 24+)** or an emulator.
+- Internet connection for the first build (downloads Gradle 8.9 + libraries, a few minutes).
+
+---
+
+## 3. Get the project
+
+**Option A — git clone** (recommended, you get updates easily):
+
+```bash
+git clone https://github.com/amirmhmdglstan-stack/Roblox-script.apk.git
+```
+
+**Option B — ZIP:** on GitHub, green `Code ▾` button → *Download ZIP* → unzip.
+
+---
+
+## 4. Open in Android Studio
+
+1. Launch Android Studio.
+2. `File → Open…`
+3. Select the **project root folder** (the one containing `settings.gradle.kts`
+   and `gradlew` — the folder this guide is in). Click **OK**.
+4. Android Studio will say the project uses Gradle 8.9 from the wrapper →
+   click **Trust Project** / **OK**.
+5. **Wait for the Gradle sync.** You'll see progress at the bottom.
+   First sync downloads dependencies and can take **5–15 minutes**.
+   When it finishes, the bottom bar shows `BUILD SUCCESSFUL` (or the sync icon stops spinning).
+6. If a popup asks about missing SDK components (Android SDK Platform 34 /
+   Build-Tools), click **Install** / **OK** and wait for it to finish.
+
+> If sync fails with a JDK error: `File → Settings → Build, Execution, Deployment →
+> Build Tools → Gradle → Gradle JDK` and choose **17** or **21** (embedded JDK).
+
+---
+
+## 5. Build the APK
+
+### 5a. Debug APK (fastest — fine for your own phone)
+
+- Menu: **`Build → Build App Bundle(s) / APK(s) → Build APK(s)`**
+- When finished, a notification appears. The APK is at:
+
+```
+app/build/outputs/apk/debug/app-debug.apk
+```
+
+That's it — send this file to your phone and install it.
+
+### 5b. Release APK (for sharing with others)
+
+1. **`Build → Generate Signed App Bundle / APK…`**
+2. Choose **APK** → Next.
+3. **Key store path:** click *Create new…*:
+   - Key store path: pick a folder, e.g. `~/keystores/roblox-script.jks`
+   - Password: create a strong one and **save it somewhere safe** 🔑
+   - Alias: `robloxscript` (or anything) — with its own password
+   - Validity: `25` years minimum, name: your name
+4. Next → choose **release** → **Finish**.
+5. APK output:
+
+```
+app/build/outputs/apk/release/app-release.apk
+```
+
+> ⚠️ **Keep the `.jks` keystore and passwords forever.** Every future update must
+> be signed with the same keystore, or users can't update (they'd have to uninstall first).
+
+---
+
+## 6. Install on your phone
+
+**Option A — file transfer (no cable):**
+1. Copy `app-debug.apk` (or `app-release.apk`) to your phone — USB, Google Drive, Telegram, email…
+2. Tap the file on the phone.
+3. If asked, allow **"Install unknown apps"** for the app you're using (Files/Telegram).
+4. If you have the website's APK installed from a different signature, uninstall it first.
+
+**Option B — USB debugging (developer workflow):**
+1. On the phone: `Settings → About phone → tap "Build number" 7 times` →
+   developer mode is enabled.
+2. `Settings → Developer options → USB debugging` → ON.
+3. Connect the phone with a USB cable, allow the debug prompt.
+4. In Android Studio, press the green **Run ▶** button, pick your phone.
+   Android Studio installs and launches the app automatically.
+
+**Option C — emulator:** In Android Studio: *Device Manager → Create device*
+(choose a recent Pixel), then press **Run ▶**.
+
+---
+
+## 7. How the app works (for curious people)
+
+- `MainActivity.kt` loads the bundled site from `app/src/main/assets/www`
+  using **WebViewAssetLoader** — Google's official, secure way to serve local
+  web content in a WebView (served under `https://appassets.androidplatform.net`).
+- JavaScript, DOM storage and sessions are enabled, so Supabase login stays
+  logged in between app launches.
+- The top thin cyan bar shows page-load progress.
+- If you ever set `REMOTE_URL` (see below), the app loads your hosted website
+  instead of the bundled copy.
+
+---
+
+## 8. Customizing the app
+
+| What | Where |
+|---|---|
+| **App name** | `app/src/main/res/values/strings.xml` → `<string name="app_name">` |
+| **App icon** | `app/src/main/res/mipmap-*` (PNGs) + `drawable/ic_launcher_foreground.xml` — or right-click `res → New → Image Asset` and draw a new one |
+| **Package ID** | `app/build.gradle.kts` → `applicationId` (change this before publishing on Google Play) |
+| **Colors** | `app/src/main/res/values/colors.xml` (navy `#060B14`, electric cyan `#00E5FF`) |
+| **Version** | `app/build.gradle.kts` → `versionCode` / `versionName` |
+| **Load a hosted URL** | `MainActivity.kt` → `REMOTE_URL` (e.g. `"https://roblox-script.onrender.com"`). Empty = bundled site. |
+
+---
+
+## 9. Updating the app after you change the website
+
+The web source lives in the `web/` folder of this repo (it's the same code as
+your `Roblox-Script` repo, plus the two config files that were missing —
+`vite.config.ts` and `tailwind.config.js` — so it can actually build).
+
+1. Install Node.js (<https://nodejs.org>).
+2. Build the site:
+
+```bash
+cd web
+npm install
+npm run build      # creates web/dist
+```
+
+3. Replace the bundled copy:
+
+```bash
+# from the repo root:
+cp -r web/dist/* app/src/main/assets/www/
+```
+
+4. Rebuild the APK in Android Studio (section 5).
+
+> Note: the Supabase URL + anon key are baked in at build time.
+> They're in `web/.env` (copy `web/.env.example` → `.env` first).
+> You can find your values in `env.txt` of the original Roblox-Script repo.
+
+---
+
+## 10. Troubleshooting
+
+| Problem | Fix |
+|---|---|
+| Gradle sync fails | Check internet. `File → Invalidate Caches… → Invalidate and Restart`. Make sure Gradle JDK is 17+ (Settings → Build Tools → Gradle). |
+| "SDK location not found" | Settings → Appearance & Behavior → System Settings → Android SDK → install **Android 14 (API 34)** platform + Build-Tools, then sync again. |
+| App opens but is blank/white | Check that `app/src/main/assets/www/index.html` exists. If missing, copy `web/dist/*` there and rebuild. |
+| Login fails | Your Supabase free project may be **paused** (free tier pauses after ~1 week of inactivity) — open the Supabase dashboard and *Restore project*. |
+| "App not installed" | A previous install used a different signature — uninstall the old app first. |
+| Persian fonts look wrong | Fonts (Vazirmatn) load from Google Fonts on first open — they need internet once, then are cached. |
+| I want a smaller APK | In `app/build.gradle.kts` → `release` block, set `isMinifyEnabled = true` and build a **signed release** APK. |
+| Phone is old (Android 6 or less) | Raise `minSdk` won't help — this app needs Android 7.0+ (API 24). |
+
+---
+
+## 11. FAQ
+
+**Do I need the Render server for the APK?**
+No. The website's frontend talks straight to Supabase, and so does the app.
+The Express server is only used to host the website files.
+
+**Do I need to change anything in Supabase?**
+No. You already ran `supabase_setup.sql` in the SQL Editor — the app uses the
+same anon key and RLS policies as the website.
+
+**Is my Supabase key safe in the APK?**
+It's the *public anon key* — the same one embedded in every website visitor's
+browser. Supabase RLS policies protect the data, exactly as on the web.
+
+**Can people publish this APK on Google Play?**
+Technically yes (after a signed release build + changing the package ID), but
+Google Play doesn't allow Roblox cheating/scripting apps — keep this for
+personal use / sideloading.

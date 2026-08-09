@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { ReportReasonType } from '../../types';
 import { supabase } from '../../lib/supabase';
+import { toPersianMessage } from '../../lib/errors';
+import { Portal } from '../common/Portal';
 import { useAuth } from '../../context/AuthContext';
 import { X, ShieldAlert, Flag } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -50,13 +52,14 @@ export const ReportModal: React.FC<ReportModalProps> = ({
       onClose();
       setDetails('');
     } catch (err: any) {
-      toast.error('خطا در ثبت گزارش تخلف: ' + (err.message || ''));
+      toast.error(toPersianMessage(err?.message, 'خطا در ثبت گزارش تخلف. دوباره تلاش کنید.'));
     } finally {
       setLoading(false);
     }
   };
 
   return (
+    <Portal>
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-dark-900/80 backdrop-blur-md p-4 animate-fadeIn"
       onClick={onClose}
@@ -143,5 +146,6 @@ export const ReportModal: React.FC<ReportModalProps> = ({
         </form>
       </div>
     </div>
+    </Portal>
   );
 };

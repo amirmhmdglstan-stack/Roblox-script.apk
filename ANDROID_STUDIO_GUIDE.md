@@ -29,6 +29,8 @@ search, likes and favorites.
 | Scripts, search, likes, favorites | Supabase database + RLS policies (already set up by you) |
 | Thumbnail uploads | Supabase Storage bucket `script-thumbnails` |
 | Online counters | `get_online_counts` / `heartbeat_presence` RPCs |
+| Exploit statuses & Roblox versions | ✅ built into the app — `MainActivity` proxies the WEAO API natively |
+| AI assistant «همیار» | ✅ built into the app — `MainActivity` talks to a free AI endpoint natively |
 | Back button | goes back inside the app (browser-style) |
 | External links | open in the phone's default browser |
 

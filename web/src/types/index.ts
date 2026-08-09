@@ -47,6 +47,7 @@ export interface Script {
   author_display_name?: string;
   author_username?: string;
   author_avatar_url?: string;
+  author_role?: UserRole;
   // Current user interaction flags
   user_reaction?: ReactionType | null;
   user_favorite?: boolean;
@@ -68,4 +69,70 @@ export interface ScriptFilterState {
 export interface ReportFormValues {
   reason: ReportReasonType;
   details: string;
+}
+
+// ======== WEAO API (Exploits section) ========
+
+export interface WeaoExploit {
+  _id: string;
+  title: string;
+  version?: string;
+  updatedDate?: string;
+  uncStatus?: boolean;
+  free?: boolean;
+  detected?: boolean;
+  rbxversion?: string;
+  updateStatus?: boolean;
+  websitelink?: string;
+  discordlink?: string;
+  purchaselink?: string;
+  platform?: string;
+  extype?: string;
+  type?: string;
+  cost?: string;
+  decompiler?: boolean;
+  multiInject?: boolean;
+  raknet?: boolean;
+  suncPercentage?: number;
+  uncPercentage?: number;
+  sunc?: {
+    suncScrap?: string;
+    suncKey?: string;
+  };
+  hidden?: boolean;
+  keysystem?: boolean;
+  clientmods?: boolean;
+  beta?: boolean;
+  elementCertified?: boolean;
+}
+
+export interface WeaoVersions {
+  Windows?: string;
+  WindowsDate?: string;
+  Mac?: string;
+  MacDate?: string;
+  Android?: string;
+  AndroidDate?: string;
+  iOS?: string;
+  iOSDate?: string;
+}
+
+export interface WeaoSuncTest {
+  name: string;
+  description?: string;
+  library?: string;
+  status: string;
+  reason?: string;
+}
+
+export interface WeaoSuncData {
+  timestamp?: number;
+  version?: string;
+  timeTaken?: number;
+  executor?: string;
+  outdated?: boolean;
+  tests?: {
+    passed?: WeaoSuncTest[];
+    failed?: WeaoSuncTest[];
+  };
 }

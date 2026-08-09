@@ -1,33 +1,8 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { Link } from 'react-router-dom';
-import { useAuth } from '../../context/AuthContext';
-import { seedSampleScripts } from '../../lib/supabase';
-import { ShieldAlert, Terminal, Sparkles, Heart } from 'lucide-react';
-import toast from 'react-hot-toast';
+import { ShieldAlert, Terminal, Heart } from 'lucide-react';
 
 export const Footer: React.FC = () => {
-  const { user } = useAuth();
-  const [seeding, setSeeding] = useState(false);
-
-  const handleSeedDemoData = async () => {
-    if (!user) {
-      toast.error('برای ایجاد داده‌های نمونه ابتدا وارد حساب کاربری خود شوید.');
-      return;
-    }
-    setSeeding(true);
-    const toastId = toast.loading('در حال افزودن اسکریپت‌های نمونه به پایگاه داده...');
-    const success = await seedSampleScripts(user.id);
-    toast.dismiss(toastId);
-    setSeeding(false);
-
-    if (success) {
-      toast.success('اسکریپت‌های نمونه با موفقیت در Supabase بارگذاری شدند!');
-      setTimeout(() => window.location.reload(), 1200);
-    } else {
-      toast.error('خطا در بارگذاری داده‌های نمونه.');
-    }
-  };
-
   return (
     <footer className="mt-20 border-t border-electric-500/15 bg-dark-900/80 backdrop-blur-md">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
@@ -84,19 +59,7 @@ export const Footer: React.FC = () => {
             <span>برای جامعه اسکریپت‌نویسان فارسی</span>
           </div>
 
-          {/* Developer Quick-Seed Demo Button */}
-          <div className="flex items-center gap-3">
-            <button
-              onClick={handleSeedDemoData}
-              disabled={seeding}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-dark-800 border border-electric-500/30 hover:border-electric-500 text-electric-400 hover:text-electric-300 transition-all text-xs font-medium"
-              title="برای تست امکانات سایت در پایگاه داده خالی"
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>{seeding ? 'در حال افزودن...' : 'تزریق اسکریپت‌های نمونه آزمایشی'}</span>
-            </button>
-            <span>© ۲۰۲۶ Roblox Script. تمامی حقوق محفوظ است.</span>
-          </div>
+          <span>© ۲۰۲۶ Roblox Script. تمامی حقوق محفوظ است.</span>
         </div>
       </div>
     </footer>

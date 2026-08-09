@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { toPersianMessage } from '../../lib/errors';
+import { Portal } from '../common/Portal';
 import { X, LogIn, UserPlus, Lock, Mail, User } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -41,7 +43,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
       if (!error) {
         onClose();
       } else {
-        toast.error(error.message || 'خطا در ورود به حساب کاربری. اطلاعات ورود را بررسی کنید.');
+        toast.error(toPersianMessage(error?.message, 'خطا در ورود به حساب کاربری. اطلاعات ورود را بررسی کنید.'));
       }
     } else {
       if (password !== confirmPassword) {
@@ -57,14 +59,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
       const { error } = await signUpWithEmail(email, password, displayName, username);
       setLoading(false);
       if (!error) {
+        // The verification-link / welcome toast is shown by AuthContext.
         onClose();
       } else {
-        toast.error(error.message || 'خطا در ثبت‌نام. ممکن است این ایمیل قبلاً ثبت شده باشد.');
+        toast.error(toPersianMessage(error?.message, 'خطا در ثبت‌نام. ممکن است این ایمیل قبلاً ثبت شده باشد.'));
       }
     }
   };
 
   return (
+    <Portal>
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-dark-900/80 backdrop-blur-md p-4 animate-fadeIn"
       onClick={onClose}
@@ -228,5 +232,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
         </div>
       </div>
     </div>
+    </Portal>
   );
 };

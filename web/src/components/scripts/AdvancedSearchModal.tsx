@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ScriptFilterState } from '../../types';
 import { X, SlidersHorizontal, Lock, Check, RotateCcw, Filter } from 'lucide-react';
+import { Portal } from '../common/Portal';
 
 interface AdvancedSearchModalProps {
   isOpen: boolean;
@@ -18,6 +19,14 @@ export const AdvancedSearchModal: React.FC<AdvancedSearchModalProps> = ({
   onReset,
 }) => {
   const [localFilters, setLocalFilters] = useState<ScriptFilterState>({ ...filters });
+
+  // Re-sync the local form state with the real filters every time the modal opens,
+  // so it never shows stale values from a previous visit.
+  useEffect(() => {
+    if (isOpen) {
+      setLocalFilters({ ...filters });
+    }
+  }, [isOpen, filters]);
 
   if (!isOpen) return null;
 
@@ -46,6 +55,7 @@ export const AdvancedSearchModal: React.FC<AdvancedSearchModalProps> = ({
   };
 
   return (
+    <Portal>
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-dark-900/80 backdrop-blur-md p-3 sm:p-6 animate-fadeIn"
       onClick={onClose}
@@ -270,5 +280,6 @@ export const AdvancedSearchModal: React.FC<AdvancedSearchModalProps> = ({
         </div>
       </div>
     </div>
+    </Portal>
   );
 };

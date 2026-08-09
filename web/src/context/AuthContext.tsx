@@ -9,10 +9,16 @@ interface AuthContextType {
   profile: Profile | null;
   loading: boolean;
   signInWithEmail: (email: string, pass: string) => Promise<{ error: any }>;
-  signUpWithEmail: (email: string, pass: string, displayName: string, username: string) => Promise<{ error: any }>;
+  signUpWithEmail: (email: string, pass: string, displayName: string, username: string) => Promise<{ error: any; needsEmailConfirmation?: boolean }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 }
+
+// Emails that ALWAYS get the admin role — at sign-up and at every login,
+// even if the account already exists with a lower role.
+const ADMIN_EMAILS = ['amirmhmdglstan@gmail.com', 'omletscripter@gmail.com'];
+const isAdminEmail = (email?: string | null): boolean =>
+  !!email && ADMIN_EMAILS.includes(email.trim().toLowerCase());
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -30,9 +36,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         .single();
 
       if (data) {
-        // Enforce amirmhmdglstan@gmail.com admin role in memory & DB
+        // Enforce the admin role for the site admin emails (login of an
+        // existing non-admin account upgrades it too) — in memory AND in the DB
         let userRole: UserRole = data.role || 'user';
-        if (currentUser.email?.toLowerCase() === 'amirmhmdglstan@gmail.com' && userRole !== 'admin') {
+        if (isAdminEmail(currentUser.email) && userRole !== 'admin') {
           userRole = 'admin';
           await supabase.from('profiles').update({ role: 'admin' }).eq('id', currentUser.id);
         }
@@ -44,13 +51,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // Create profile fallback if trigger hasn't fired yet
         const defaultName = currentUser.user_metadata?.display_name || currentUser.email?.split('@')[0] || 'کاربر جدید';
         const defaultUsername = currentUser.user_metadata?.username || (currentUser.email?.split('@')[0] + '_' + Math.random().toString(36).substring(2, 6));
-        const isAdminEmail = currentUser.email?.toLowerCase() === 'amirmhmdglstan@gmail.com';
+        const isAdmin = isAdminEmail(currentUser.email);
 
         const newProfile: Profile = {
           id: currentUser.id,
           username: defaultUsername,
           display_name: defaultName,
-          role: isAdminEmail ? 'admin' : 'user',
+          role: isAdmin ? 'admin' : 'user',
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         };
@@ -118,7 +125,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const signUpWithEmail = async (email: string, pass: string, displayName: string, username: string) => {
-    const isAdminEmail = email.toLowerCase() === 'amirmhmdglstan@gmail.com';
+    const isAdmin = isAdminEmail(email);
     const { data, error } = await supabase.auth.signUp({
       email,
       password: pass,
@@ -126,16 +133,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         data: {
           display_name: displayName,
           username: username,
-          role: isAdminEmail ? 'admin' : 'user',
+          role: isAdmin ? 'admin' : 'user',
         },
       },
     });
 
+    // When email confirmation is enabled in Supabase, signUp succeeds but
+    // returns NO session — the user must click the verification link first.
+    const needsEmailConfirmation = !error && !!data.user && !data.session;
+
     if (!error && data.user) {
-      toast.success('حساب کاربری شما با موفقیت ساخته شد!');
-      await fetchProfile(data.user);
+      if (needsEmailConfirmation) {
+        toast('لینک تاییدیه ایمیل برای شما ارسال شد. روی آن کلیک کنید', {
+          icon: '📩',
+          duration: 9000,
+          style: {
+            border: '1px solid rgba(0, 229, 255, 0.5)',
+            fontWeight: 700,
+          },
+        });
+      } else {
+        toast.success('حساب کاربری شما با موفقیت ساخته شد!');
+        await fetchProfile(data.user);
+      }
     }
-    return { error };
+    return { error, needsEmailConfirmation };
   };
 
   const signOut = async () => {

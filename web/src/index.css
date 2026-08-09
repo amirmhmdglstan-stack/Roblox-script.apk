@@ -3,9 +3,17 @@
 @tailwind utilities;
 
 @layer base {
+  html {
+    /* Never let a stray wide element create horizontal scroll on mobile */
+    overflow-x: hidden;
+    overflow-x: clip;
+  }
+
   body {
     @apply bg-dark-900 text-slate-100 antialiased font-persian;
     background-color: #060B14;
+    overflow-x: hidden;
+    overflow-x: clip;
   }
 }
 
@@ -60,4 +68,10 @@
 /* RTL Helpers */
 [dir="rtl"] .rtl-space-x-reverse > :not([hidden]) ~ :not([hidden]) {
   --tw-space-x-reverse: 1;
+}
+
+@layer utilities {
+  .dir-ltr {
+    direction: ltr;
+  }
 }

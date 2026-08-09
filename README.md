@@ -5,10 +5,18 @@ This repository contains a complete **Android Studio project** that packages
 (a Persian RTL React + Supabase community platform for Roblox scripts)
 into a native Android app (APK).
 
+> **Built from the `arena/019fcecf-roblox-script` branch** of the original
+> project (the maintained one — the `main` branch is outdated/buggy).
+
 The app is **not a link to the website** — the full web app is bundled inside
 the APK (`app/src/main/assets/www`) and rendered with a secure Android WebView,
 so the UI, styling, Supabase auth, uploads, search — everything — works exactly
 like the original web project, straight from your Supabase database.
+
+The original website's Express server also proxies third-party APIs
+(exploit statuses from WEAO, the AI assistant «همیار»). In this app those
+`/api/*` endpoints are implemented **natively inside the Android app**
+(`MainActivity.kt`), so every feature works in the APK with no server at all.
 
 ## ✅ What's inside
 

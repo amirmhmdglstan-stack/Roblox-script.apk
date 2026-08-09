@@ -29,7 +29,7 @@ export const AuthorProfilePage: React.FC = () => {
       // 2. Fetch public scripts by this author
       const { data: scriptsData, error: scriptsErr } = await supabase
         .from('scripts')
-        .select(`*, profiles:author_id (display_name, username, avatar_url)`)
+        .select(`*, profiles:author_id (display_name, username, avatar_url, role)`)
         .eq('author_id', authorId)
         .eq('status', 'published')
         .eq('visibility', 'public')
@@ -41,6 +41,7 @@ export const AuthorProfilePage: React.FC = () => {
           author_display_name: s.profiles?.display_name,
           author_username: s.profiles?.username,
           author_avatar_url: s.profiles?.avatar_url,
+          author_role: s.profiles?.role,
         }));
         setScripts(parsed);
       }
@@ -103,7 +104,14 @@ export const AuthorProfilePage: React.FC = () => {
           </div>
           <div>
             <div className="flex items-center gap-2 mb-1">
-              <h1 className="text-2xl font-black text-white">{author.display_name}</h1>
+              <h1 className="text-2xl font-black text-white flex items-center gap-1.5">
+                <span>{author.display_name}</span>
+                {author.role === 'admin' && (
+                  <span title="مدیر سایت" className="text-xl select-none">
+                    👑
+                  </span>
+                )}
+              </h1>
               {author.role === 'admin' && (
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs font-bold">
                   <Shield className="w-3.5 h-3.5" />
@@ -130,7 +138,7 @@ export const AuthorProfilePage: React.FC = () => {
         </h2>
 
         {scripts.length > 0 ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-6">
             {scripts.map((script) => (
               <ScriptCard key={script.id} script={script} onRefresh={fetchAuthorData} />
             ))}

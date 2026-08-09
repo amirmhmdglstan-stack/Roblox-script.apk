@@ -1,7 +1,9 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { copyToClipboard } from '../lib/clipboard';
+import { toPersianMessage } from '../lib/errors';
+import { buildClipboardScript } from '../lib/lua';
+import { MarkdownText } from '../components/common/MarkdownText';
 import { Script, ReactionType } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { ReportModal } from '../components/scripts/ReportModal';
@@ -23,6 +25,7 @@ import {
   ShieldCheck,
   AlertTriangle,
   Trash2,
+  Pencil,
   Terminal,
   Layers,
   ArrowRight
@@ -56,7 +59,7 @@ export const ScriptDetailPage: React.FC<{ onOpenAuthModal: () => void }> = ({ on
       // First try slug, then fallback to id
       let query = supabase
         .from('scripts')
-        .select(`*, profiles:author_id (display_name, username, avatar_url)`);
+        .select(`*, profiles:author_id (display_name, username, avatar_url, role)`);
 
       const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(slugOrId);
       if (isUuid) {
@@ -77,6 +80,7 @@ export const ScriptDetailPage: React.FC<{ onOpenAuthModal: () => void }> = ({ on
         author_display_name: data.profiles?.display_name,
         author_username: data.profiles?.username,
         author_avatar_url: data.profiles?.avatar_url,
+        author_role: data.profiles?.role,
       };
 
       setScript(parsed);
@@ -127,27 +131,67 @@ export const ScriptDetailPage: React.FC<{ onOpenAuthModal: () => void }> = ({ on
     fetchScriptDetail();
   }, [fetchScriptDetail]);
 
-  // Handle Copy to Clipboard
+  // Clipboard helper — clipboard APIs can reject on some browsers/permissions
+  const writeToClipboard = async (text: string): Promise<boolean> => {
+    try {
+      // Native Android bridge first (works on file:// pages, shows a toast)
+      const bridge = (window as any).AndroidBridge;
+      if (bridge && typeof bridge.copyToClipboard === 'function') {
+        bridge.copyToClipboard(text);
+        return true;
+      }
+    } catch (e) {
+      // fall through to browser API
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      try {
+        // Legacy fallback for very old browsers
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+  };
+
+  // Handle Copy to Clipboard — unverified scripts get a harmless visual warning
+  // comment on the first line (a `--` Lua comment, so the run is never affected).
   const handleCopyCode = async () => {
     if (!script) return;
-    const ok = await copyToClipboard(script.script_content);
-    if (ok) {
-      setCopied(true);
-      toast.success('کد اسکریپت در حافظه کپی شد!');
-      setTimeout(() => setCopied(false), 2500);
-    } else {
-      toast.error('کپی در این دستگاه پشتیبانی نمی‌شود');
+    const isUntested = !script.is_verified;
+    const ok = await writeToClipboard(
+      buildClipboardScript(script.script_content, !!script.is_verified)
+    );
+    if (!ok) {
+      toast.error('کپی در مرورگر شما ممکن نشد؛ کد را به‌صورت دستی انتخاب و کپی کنید.');
+      return;
     }
+    setCopied(true);
+    toast.success(
+      isUntested
+        ? 'کد اسکریپت کپی شد!\nخط اول فقط یک هشدار دیداری است (کامنت Lua) و تأثیری روی اجرای اسکریپت ندارد.'
+        : 'کد اسکریپت در حافظه کپی شد!'
+    );
+    setTimeout(() => setCopied(false), 2500);
   };
 
   // Handle Share Link
   const handleShare = async () => {
-    const url = window.location.href;
-    const ok = await copyToClipboard(url);
+    const ok = await writeToClipboard(window.location.href);
     if (ok) {
       toast.success('لینک اسکریپت کپی شد! اکنون می‌توانید با دوستانتان به اشتراک بگذارید.');
     } else {
-      toast.error('کپی در این دستگاه پشتیبانی نمی‌شود');
+      toast.error('کپی لینک ممکن نشد؛ آدرس صفحه را از نوار مرورگر کپی کنید.');
     }
   };
 
@@ -200,7 +244,7 @@ export const ScriptDetailPage: React.FC<{ onOpenAuthModal: () => void }> = ({ on
         }
       }
     } catch (err: any) {
-      toast.error('خطا در ثبت واکنش: ' + (err.message || ''));
+      toast.error(toPersianMessage(err?.message, 'خطا در ثبت واکنش.'));
     }
   };
 
@@ -234,7 +278,7 @@ export const ScriptDetailPage: React.FC<{ onOpenAuthModal: () => void }> = ({ on
         toast.success('به لیست علاقه‌مندی‌ها اضافه شد!');
       }
     } catch (err: any) {
-      toast.error('خطا در ذخیره علاقه‌مندی: ' + (err.message || ''));
+      toast.error(toPersianMessage(err?.message, 'خطا در ذخیره علاقه‌مندی.'));
     }
   };
 
@@ -254,7 +298,7 @@ export const ScriptDetailPage: React.FC<{ onOpenAuthModal: () => void }> = ({ on
         nextVerify ? 'نشان تأیید مدیریت (Approval Mark) اعطا شد.' : 'نشان تأیید حذف شد.'
       );
     } catch (err: any) {
-      toast.error('خطا در اعمال تغییرات مدیریت.');
+      toast.error(toPersianMessage(err?.message, 'خطا در اعمال تغییرات مدیریت.'));
     }
   };
 
@@ -272,7 +316,7 @@ export const ScriptDetailPage: React.FC<{ onOpenAuthModal: () => void }> = ({ on
       setScript((prev) => (prev ? { ...prev, is_patched: nextPatched } : prev));
       toast.success(nextPatched ? 'وضعیت به پچ‌شده تغییر کرد.' : 'وضعیت پچ برداشته شد.');
     } catch (err: any) {
-      toast.error('خطا در اعمال تغییرات.');
+      toast.error(toPersianMessage(err?.message, 'خطا در اعمال تغییرات.'));
     }
   };
 
@@ -288,7 +332,7 @@ export const ScriptDetailPage: React.FC<{ onOpenAuthModal: () => void }> = ({ on
       toast.success('اسکریپت با موفقیت حذف شد.');
       navigate('/');
     } catch (err: any) {
-      toast.error('خطا در حذف اسکریپت: ' + (err.message || ''));
+      toast.error(toPersianMessage(err?.message, 'خطا در حذف اسکریپت.'));
     }
   };
 
@@ -390,18 +434,18 @@ export const ScriptDetailPage: React.FC<{ onOpenAuthModal: () => void }> = ({ on
               )}
             </div>
 
-            <h1 className="text-2xl sm:text-3xl font-black text-white leading-snug">
+            <h1 className="text-xl sm:text-3xl font-black text-white leading-snug break-words">
               {script.title}
             </h1>
           </div>
 
           {/* Action Bar Required by Spec: Like, Dislike, Favorite, Share, Report */}
-          <div className="glass-card rounded-2xl p-4 flex flex-wrap items-center justify-between gap-4">
+          <div className="glass-card rounded-2xl p-3 sm:p-4 flex flex-wrap items-center justify-between gap-2 sm:gap-4">
             <div className="flex items-center gap-2">
               {/* Like */}
               <button
                 onClick={() => handleReaction('like')}
-                className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold border transition-all ${
+                className={`flex items-center gap-1.5 px-2.5 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-bold border transition-all ${
                   userReaction === 'like'
                     ? 'bg-rose-500/20 border-rose-500 text-rose-300 shadow-[0_0_15px_rgba(244,63,94,0.3)]'
                     : 'bg-dark-900/70 border-white/10 text-slate-300 hover:border-rose-500/40 hover:text-rose-400'
@@ -414,7 +458,7 @@ export const ScriptDetailPage: React.FC<{ onOpenAuthModal: () => void }> = ({ on
               {/* Dislike */}
               <button
                 onClick={() => handleReaction('dislike')}
-                className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold border transition-all ${
+                className={`flex items-center gap-1.5 px-2.5 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-bold border transition-all ${
                   userReaction === 'dislike'
                     ? 'bg-amber-500/20 border-amber-500 text-amber-300'
                     : 'bg-dark-900/70 border-white/10 text-slate-300 hover:border-amber-500/40 hover:text-amber-400'
@@ -427,7 +471,7 @@ export const ScriptDetailPage: React.FC<{ onOpenAuthModal: () => void }> = ({ on
               {/* Favorite / Bookmark */}
               <button
                 onClick={handleToggleFavorite}
-                className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold border transition-all ${
+                className={`flex items-center gap-1.5 px-2.5 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-bold border transition-all ${
                   userFavorite
                     ? 'bg-amber-400/20 border-amber-400 text-amber-300'
                     : 'bg-dark-900/70 border-white/10 text-slate-300 hover:border-amber-400/40 hover:text-amber-300'
@@ -442,11 +486,11 @@ export const ScriptDetailPage: React.FC<{ onOpenAuthModal: () => void }> = ({ on
               {/* Share */}
               <button
                 onClick={handleShare}
-                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-dark-900/70 border border-white/10 hover:border-electric-500/40 text-slate-300 hover:text-white text-xs font-bold transition-all"
+                className="flex items-center gap-1.5 px-2.5 sm:px-3.5 py-2 rounded-xl bg-dark-900/70 border border-white/10 hover:border-electric-500/40 text-slate-300 hover:text-white text-[11px] sm:text-xs font-bold transition-all"
                 title="اشتراک‌گذاری لینک"
               >
                 <Share2 className="w-4 h-4 text-electric-400" />
-                <span>اشتراک‌گذاری</span>
+                <span className="hidden min-[400px]:inline">اشتراک‌گذاری</span>
               </button>
 
               {/* Report */}
@@ -459,11 +503,11 @@ export const ScriptDetailPage: React.FC<{ onOpenAuthModal: () => void }> = ({ on
                   }
                   setIsReportOpen(true);
                 }}
-                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-dark-900/70 border border-white/10 hover:border-rose-500/40 text-slate-300 hover:text-rose-400 text-xs font-bold transition-all"
+                className="flex items-center gap-1.5 px-2.5 sm:px-3.5 py-2 rounded-xl bg-dark-900/70 border border-white/10 hover:border-rose-500/40 text-slate-300 hover:text-rose-400 text-[11px] sm:text-xs font-bold transition-all"
                 title="گزارش تخلف"
               >
                 <Flag className="w-4 h-4 text-rose-500" />
-                <span>گزارش تخلف</span>
+                <span className="hidden min-[400px]:inline">گزارش تخلف</span>
               </button>
             </div>
           </div>
@@ -544,8 +588,13 @@ export const ScriptDetailPage: React.FC<{ onOpenAuthModal: () => void }> = ({ on
                 )}
               </div>
               <div className="overflow-hidden">
-                <div className="font-bold text-base text-white group-hover:text-electric-400 transition-colors truncate">
-                  {script.author_display_name || 'کاربر روبلاکس'}
+                <div className="font-bold text-base text-white group-hover:text-electric-400 transition-colors truncate flex items-center gap-1.5">
+                  <span className="truncate">{script.author_display_name || 'کاربر روبلاکس'}</span>
+                  {script.author_role === 'admin' && (
+                    <span title="مدیر سایت" className="text-sm shrink-0 select-none">
+                      👑
+                    </span>
+                  )}
                 </div>
                 <div className="text-xs font-mono text-slate-400 truncate">
                   @{script.author_username || 'user'}
@@ -622,9 +671,10 @@ export const ScriptDetailPage: React.FC<{ onOpenAuthModal: () => void }> = ({ on
               <h3 className="text-xs font-bold text-electric-400 mb-3 uppercase tracking-wider">
                 ویژگی‌ها و امکانات
               </h3>
-              <p className="text-xs sm:text-sm text-slate-200 leading-relaxed whitespace-pre-line">
-                {script.features}
-              </p>
+              <MarkdownText
+                text={script.features}
+                className="text-xs sm:text-sm text-slate-200 leading-relaxed"
+              />
             </div>
           )}
 
@@ -699,6 +749,16 @@ export const ScriptDetailPage: React.FC<{ onOpenAuthModal: () => void }> = ({ on
                       {script.is_patched ? 'تغییر وضعیت به: سالم و کارآمد' : 'تغییر وضعیت به: پچ‌شده (Patched)'}
                     </button>
                   </>
+                )}
+
+                {isAuthor && (
+                  <button
+                    onClick={() => navigate(`/edit/${script.id}`)}
+                    className="w-full py-2 px-3 rounded-xl bg-dark-900 border border-electric-500/40 text-electric-300 hover:bg-electric-500/15 text-xs font-bold transition-colors flex items-center justify-center gap-1.5"
+                  >
+                    <Pencil className="w-4 h-4" />
+                    <span>ویرایش اسکریپت</span>
+                  </button>
                 )}
 
                 {(isAuthor || isAdminOrMod) && (

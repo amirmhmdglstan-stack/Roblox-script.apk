@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
+import { toPersianMessage } from '../lib/errors';
 import { Script } from '../types';
 import { ScriptCard } from '../components/scripts/ScriptCard';
 import {
@@ -58,7 +59,7 @@ export const DashboardPage: React.FC<{ onOpenAuthModal: () => void }> = ({ onOpe
       // 1. Fetch user's scripts (all statuses)
       const { data: scriptsData, error: scriptsErr } = await supabase
         .from('scripts')
-        .select(`*, profiles:author_id (display_name, username, avatar_url)`)
+        .select(`*, profiles:author_id (display_name, username, avatar_url, role)`)
         .eq('author_id', user.id)
         .order('created_at', { ascending: false });
 
@@ -68,13 +69,14 @@ export const DashboardPage: React.FC<{ onOpenAuthModal: () => void }> = ({ onOpe
         author_display_name: s.profiles?.display_name,
         author_username: s.profiles?.username,
         author_avatar_url: s.profiles?.avatar_url,
+        author_role: s.profiles?.role,
       }));
       setMyScripts(parsedScripts);
 
       // 2. Fetch favorites
       const { data: favsData, error: favsErr } = await supabase
         .from('script_favorites')
-        .select(`script_id, scripts:script_id (*, profiles:author_id (display_name, username, avatar_url))`)
+        .select(`script_id, scripts:script_id (*, profiles:author_id (display_name, username, avatar_url, role))`)
         .eq('user_id', user.id);
 
       if (favsErr) throw favsErr;
@@ -87,6 +89,7 @@ export const DashboardPage: React.FC<{ onOpenAuthModal: () => void }> = ({ onOpe
             author_display_name: s.profiles?.display_name,
             author_username: s.profiles?.username,
             author_avatar_url: s.profiles?.avatar_url,
+            author_role: s.profiles?.role,
           };
         })
         .filter((item: any) => item !== null) as Script[];
@@ -113,7 +116,7 @@ export const DashboardPage: React.FC<{ onOpenAuthModal: () => void }> = ({ onOpe
       toast.success('اسکریپت با موفقیت حذف شد');
       setMyScripts((prev) => prev.filter((s) => s.id !== scriptId));
     } catch (err: any) {
-      toast.error('خطا در حذف اسکریپت: ' + (err.message || ''));
+      toast.error(toPersianMessage(err?.message, 'خطا در حذف اسکریپت.'));
     }
   };
 
@@ -140,7 +143,7 @@ export const DashboardPage: React.FC<{ onOpenAuthModal: () => void }> = ({ onOpe
       await refreshProfile();
       toast.success('پروفایل کاربری با موفقیت به‌روزرسانی شد');
     } catch (err: any) {
-      toast.error('خطا در به‌روزرسانی پروفایل: ' + (err.message || ''));
+      toast.error(toPersianMessage(err?.message, 'خطا در به‌روزرسانی پروفایل.'));
     } finally {
       setSavingProfile(false);
     }
@@ -192,7 +195,7 @@ export const DashboardPage: React.FC<{ onOpenAuthModal: () => void }> = ({ onOpe
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
       {/* Header Profile Area */}
-      <div className="glass-card rounded-3xl p-6 sm:p-8 mb-8 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6">
+      <div className="glass-card rounded-3xl p-4 sm:p-8 mb-8 flex flex-row items-center justify-between gap-3 sm:gap-6">
         <div className="flex items-center gap-4">
           <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-dark-700 flex items-center justify-center font-black text-white text-2xl border border-electric-500/40 shadow-glow-sm shrink-0">
             {profile?.avatar_url ? (
@@ -203,7 +206,7 @@ export const DashboardPage: React.FC<{ onOpenAuthModal: () => void }> = ({ onOpe
           </div>
           <div>
             <div className="flex items-center gap-2 mb-1">
-              <h1 className="text-2xl font-black text-white">{profile?.display_name || 'کاربر گرامی'}</h1>
+              <h1 className="text-xl sm:text-2xl font-black text-white truncate max-w-[200px] sm:max-w-none">{profile?.display_name || 'کاربر گرامی'}</h1>
               {profile?.role === 'admin' && (
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs font-bold">
                   <Shield className="w-3.5 h-3.5" />
@@ -218,10 +221,11 @@ export const DashboardPage: React.FC<{ onOpenAuthModal: () => void }> = ({ onOpe
 
         <Link
           to="/upload"
-          className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-electric-600 to-electric-500 hover:from-electric-500 hover:to-electric-400 text-dark-900 font-bold text-sm shadow-glow-sm hover:shadow-glow transition-all"
+          title="آپلود اسکریپت جدید"
+          className="flex items-center gap-2 px-3 sm:px-5 py-2 sm:py-2.5 rounded-xl bg-gradient-to-r from-electric-600 to-electric-500 hover:from-electric-500 hover:to-electric-400 text-dark-900 font-bold text-xs sm:text-sm shadow-glow-sm hover:shadow-glow transition-all shrink-0"
         >
           <Upload className="w-4 h-4" />
-          <span>آپلود اسکریپت جدید</span>
+          <span className="hidden min-[420px]:inline">آپلود اسکریپت جدید</span>
         </Link>
       </div>
 
@@ -229,7 +233,7 @@ export const DashboardPage: React.FC<{ onOpenAuthModal: () => void }> = ({ onOpe
       <div className="flex border-b border-white/10 mb-8 overflow-x-auto">
         <button
           onClick={() => setActiveTab('scripts')}
-          className={`flex items-center gap-2 px-6 py-3 font-bold text-sm border-b-2 transition-all whitespace-nowrap ${
+          className={`flex items-center gap-1.5 sm:gap-2 px-3.5 sm:px-6 py-2.5 sm:py-3 font-bold text-xs sm:text-sm border-b-2 transition-all whitespace-nowrap ${
             activeTab === 'scripts'
               ? 'border-electric-500 text-electric-500'
               : 'border-transparent text-slate-400 hover:text-white'
@@ -241,7 +245,7 @@ export const DashboardPage: React.FC<{ onOpenAuthModal: () => void }> = ({ onOpe
 
         <button
           onClick={() => setActiveTab('favorites')}
-          className={`flex items-center gap-2 px-6 py-3 font-bold text-sm border-b-2 transition-all whitespace-nowrap ${
+          className={`flex items-center gap-1.5 sm:gap-2 px-3.5 sm:px-6 py-2.5 sm:py-3 font-bold text-xs sm:text-sm border-b-2 transition-all whitespace-nowrap ${
             activeTab === 'favorites'
               ? 'border-electric-500 text-electric-500'
               : 'border-transparent text-slate-400 hover:text-white'
@@ -253,7 +257,7 @@ export const DashboardPage: React.FC<{ onOpenAuthModal: () => void }> = ({ onOpe
 
         <button
           onClick={() => setActiveTab('settings')}
-          className={`flex items-center gap-2 px-6 py-3 font-bold text-sm border-b-2 transition-all whitespace-nowrap ${
+          className={`flex items-center gap-1.5 sm:gap-2 px-3.5 sm:px-6 py-2.5 sm:py-3 font-bold text-xs sm:text-sm border-b-2 transition-all whitespace-nowrap ${
             activeTab === 'settings'
               ? 'border-electric-500 text-electric-500'
               : 'border-transparent text-slate-400 hover:text-white'
@@ -268,20 +272,29 @@ export const DashboardPage: React.FC<{ onOpenAuthModal: () => void }> = ({ onOpe
       {activeTab === 'scripts' && (
         <div>
           {myScripts.length > 0 ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-6">
               {myScripts.map((script) => (
                 <div key={script.id} className="relative flex flex-col group">
                   <ScriptCard script={script} onRefresh={fetchDashboardData} />
                   {/* Dashboard status overlay & Delete */}
                   <div className="mt-2 flex items-center justify-between p-2.5 rounded-xl bg-dark-800/90 border border-white/10 text-xs">
                     <div>{getStatusBadge(script.status)}</div>
-                    <button
-                      onClick={() => handleDeleteScript(script.id, script.title)}
-                      className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
-                      title="حذف اسکریپت"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => navigate(`/edit/${script.id}`)}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-electric-400 hover:bg-electric-500/10 transition-colors"
+                        title="ویرایش اسکریپت"
+                      >
+                        <Edit3 className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteScript(script.id, script.title)}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+                        title="حذف اسکریپت"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -309,7 +322,7 @@ export const DashboardPage: React.FC<{ onOpenAuthModal: () => void }> = ({ onOpe
       {activeTab === 'favorites' && (
         <div>
           {myFavorites.length > 0 ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-6">
               {myFavorites.map((script) => (
                 <ScriptCard
                   key={script.id}

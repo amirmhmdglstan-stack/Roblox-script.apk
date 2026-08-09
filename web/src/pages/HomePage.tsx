@@ -1,10 +1,11 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Link } from 'react-router-dom';
-import { supabase, seedSampleScripts } from '../lib/supabase';
+import { Link, useNavigate } from 'react-router-dom';
+import { supabase } from '../lib/supabase';
 import { Script, ScriptFilterState } from '../types';
 import { ScriptCard } from '../components/scripts/ScriptCard';
 import { AdvancedSearchModal } from '../components/scripts/AdvancedSearchModal';
-import { useAuth } from '../context/AuthContext';
+import { fetchScriptsWithFilters } from '../lib/fetchScripts';
+import { defaultFilters, filtersToSearchString } from '../lib/searchParams';
 import {
   Search,
   SlidersHorizontal,
@@ -12,182 +13,121 @@ import {
   BookOpen,
   Rocket,
   Upload,
-  Sparkles,
   RefreshCw,
-  Terminal
+  Terminal,
+  Crown
 } from 'lucide-react';
-import toast from 'react-hot-toast';
 
-const defaultFilters: ScriptFilterState = {
-  query: '',
-  exactMatch: false,
-  verifiedOnly: false,
-  allGames: false,
-  patchedOnly: false,
-  keyRequirement: '',
-  scriptType: '',
-  gameQuery: '',
-  sortBy: 'created_at',
-  sortOrder: 'new',
-};
+const RECENT_PAGE_SIZE = 4;
 
-export const HomePage: React.FC<{ onOpenAuthModal: () => void }> = ({ onOpenAuthModal }) => {
-  const { user } = useAuth();
+export const HomePage: React.FC = () => {
+  const navigate = useNavigate();
   const [scripts, setScripts] = useState<Script[]>([]);
   const [totalScriptCount, setTotalScriptCount] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(true);
-  const [filters, setFilters] = useState<ScriptFilterState>(defaultFilters);
-  const [isAdvancedModalOpen, setIsAdvancedModalOpen] = useState(false);
   const [page, setPage] = useState<number>(1);
   const [hasMore, setHasMore] = useState<boolean>(false);
 
-  const fetchScripts = useCallback(
-    async (currentPage = 1, isLoadMore = false) => {
-      setLoading(true);
-      try {
-        const pageSize = 12;
-        const offset = (currentPage - 1) * pageSize;
+  // The hero search-box state. Nothing is filtered on THIS page anymore —
+  // submitting always opens the dedicated /search results page (Google-style).
+  const [searchFilters, setSearchFilters] = useState<ScriptFilterState>(defaultFilters);
+  const [isAdvancedModalOpen, setIsAdvancedModalOpen] = useState(false);
 
-        // Fetch real count from scripts table
-        const { count } = await supabase
-          .from('scripts')
-          .select('id', { count: 'exact', head: true })
-          .eq('status', 'published')
-          .eq('visibility', 'public');
+  // «اسکریپت های ادمین» showcase strip (4 by default, expandable to all)
+  const [adminScripts, setAdminScripts] = useState<Script[]>([]);
+  const [adminHasMore, setAdminHasMore] = useState<boolean>(false);
+  const [adminExpanded, setAdminExpanded] = useState<boolean>(false);
 
-        if (count !== null) {
-          setTotalScriptCount(count);
-        }
+  const fetchAdminScripts = useCallback(async (expanded: boolean) => {
+    try {
+      // Default view shows exactly 4 — fetch 5 only to know whether «مشاهده بیشتر» is needed
+      const limit = expanded ? 64 : 5;
+      const { data, error } = await supabase
+        .from('scripts')
+        .select(`*, profiles:author_id!inner (display_name, username, avatar_url, role)`)
+        .eq('profiles.role', 'admin')
+        .eq('status', 'published')
+        .eq('visibility', 'public')
+        .order('created_at', { ascending: false })
+        .limit(limit);
 
-        // Use search_scripts RPC for advanced filtering & search if available, or fallback to query builder
-        let data: Script[] | null = null;
-        try {
-          const { data: rpcData, error: rpcError } = await supabase.rpc('search_scripts', {
-            p_query: filters.query || null,
-            p_exact_match: filters.exactMatch,
-            p_verified_only: filters.verifiedOnly,
-            p_all_games: filters.allGames,
-            p_patched_only: filters.patchedOnly,
-            p_key_required: filters.keyRequirement || null,
-            p_script_type: filters.scriptType || null,
-            p_game_query: filters.gameQuery || null,
-            p_sort_by: filters.sortBy,
-            p_sort_order: filters.sortOrder,
-            p_limit: pageSize + 1,
-            p_offset: offset,
-          });
+      if (error) throw error;
 
-          if (!rpcError && rpcData) {
-            data = rpcData as Script[];
-          }
-        } catch (e) {
-          // Fallback to standard Supabase select if RPC fails
-        }
+      const rows = (data || []).map((row: any) => ({
+        ...row,
+        author_display_name: row.profiles?.display_name,
+        author_username: row.profiles?.username,
+        author_avatar_url: row.profiles?.avatar_url,
+        author_role: row.profiles?.role,
+      }));
 
-        if (!data) {
-          let queryBuilder = supabase
-            .from('scripts')
-            .select(
-              `*,
-              profiles:author_id (display_name, username, avatar_url)`
-            )
-            .eq('status', 'published')
-            .eq('visibility', 'public');
-
-          if (filters.query) {
-            if (filters.exactMatch) {
-              queryBuilder = queryBuilder.ilike('title', filters.query);
-            } else {
-              queryBuilder = queryBuilder.or(
-                `title.ilike.%${filters.query}%,game_name.ilike.%${filters.query}%,features.ilike.%${filters.query}%`
-              );
-            }
-          }
-
-          if (filters.gameQuery) {
-            queryBuilder = queryBuilder.ilike('game_name', `%${filters.gameQuery}%`);
-          }
-
-          if (filters.verifiedOnly) {
-            queryBuilder = queryBuilder.eq('is_verified', true);
-          }
-
-          if (filters.allGames) {
-            queryBuilder = queryBuilder.eq('is_hub_or_universal', true);
-          }
-
-          if (filters.patchedOnly) {
-            queryBuilder = queryBuilder.eq('is_patched', true);
-          }
-
-          if (filters.keyRequirement) {
-            queryBuilder = queryBuilder.eq('key_requirement', filters.keyRequirement);
-          }
-
-          queryBuilder = queryBuilder
-            .order(filters.sortBy, { ascending: filters.sortOrder === 'old' })
-            .range(offset, offset + pageSize);
-
-          const { data: selectData, error } = await queryBuilder;
-          if (error) throw error;
-          data = (selectData || []).map((row: any) => ({
-            ...row,
-            author_display_name: row.profiles?.display_name,
-            author_username: row.profiles?.username,
-            author_avatar_url: row.profiles?.avatar_url,
-          }));
-        }
-
-        const hasNext = data.length > pageSize;
-        const pageScripts = hasNext ? data.slice(0, pageSize) : data;
-
-        setHasMore(hasNext);
-        setScripts((prev) => (isLoadMore ? [...prev, ...pageScripts] : pageScripts));
-      } catch (err: any) {
-        console.error('Error fetching scripts:', err);
-      } finally {
-        setLoading(false);
+      if (expanded) {
+        setAdminHasMore(false);
+        setAdminScripts(rows);
+      } else {
+        setAdminHasMore(rows.length > 4);
+        setAdminScripts(rows.slice(0, 4));
       }
-    },
-    [filters]
-  );
+    } catch (err) {
+      console.error('Error fetching admin scripts:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchAdminScripts(false);
+  }, [fetchAdminScripts]);
+
+  // Recent scripts — admin uploads are excluded here because they have their
+  // own dedicated «اسکریپت های ادمین» section above.
+  const fetchScripts = useCallback(async (currentPage = 1, isLoadMore = false) => {
+    setLoading(true);
+    try {
+      // Fetch real count from scripts table (for the hero stats card)
+      const { count } = await supabase
+        .from('scripts')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'published')
+        .eq('visibility', 'public');
+
+      if (count !== null) {
+        setTotalScriptCount(count);
+      }
+
+      const { scripts: list, hasMore: more } = await fetchScriptsWithFilters(
+        defaultFilters,
+        currentPage,
+        RECENT_PAGE_SIZE,
+        true
+      );
+
+      setHasMore(more);
+      setScripts((prev) => (isLoadMore ? [...prev, ...list] : list));
+    } catch (err: any) {
+      console.error('Error fetching scripts:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     setPage(1);
     fetchScripts(1, false);
   }, [fetchScripts]);
 
-  const handleSearchSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setPage(1);
-    fetchScripts(1, false);
+  // Any search (even an empty one) opens the dedicated results page
+  const goToSearch = (filters: ScriptFilterState) => {
+    navigate(`/search${filtersToSearchString(filters)}`);
   };
 
-  const handleExactMatchToggle = (checked: boolean) => {
-    setFilters((prev) => ({ ...prev, exactMatch: checked }));
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    goToSearch({ ...searchFilters, query: searchFilters.query.trim() });
   };
 
   const handleLoadMore = () => {
     const nextPage = page + 1;
     setPage(nextPage);
     fetchScripts(nextPage, true);
-  };
-
-  const handleSeed = async () => {
-    if (!user) {
-      toast.error('برای بارگذاری نمونه اسکریپت ابتدا وارد حساب کاربری شوید.');
-      onOpenAuthModal();
-      return;
-    }
-    const toastId = toast.loading('در حال افزودن اسکریپت‌های نمونه به پایگاه داده...');
-    const success = await seedSampleScripts(user.id);
-    toast.dismiss(toastId);
-    if (success) {
-      toast.success('اسکریپت‌های نمونه با موفقیت در Supabase اضافه شدند!');
-      fetchScripts(1, false);
-    } else {
-      toast.error('خطا در افزودن اسکریپت‌های نمونه.');
-    }
   };
 
   return (
@@ -203,7 +143,7 @@ export const HomePage: React.FC<{ onOpenAuthModal: () => void }> = ({ onOpenAuth
             <span>پلتفرم تخصصی اسکریپت‌های فارسی روبلاکس</span>
           </div>
 
-          <h1 className="text-4xl sm:text-6xl font-black tracking-tight text-white mb-6 glow-text">
+          <h1 className="text-3xl sm:text-5xl lg:text-6xl font-black tracking-tight text-white mb-6 glow-text">
             Roblox Script
           </h1>
 
@@ -214,39 +154,41 @@ export const HomePage: React.FC<{ onOpenAuthModal: () => void }> = ({ onOpenAuth
             همه توسط خود شما آپلود شده‌اند!
           </p>
 
-          {/* Main Search Box Required by Spec */}
+          {/* Main Search Box — submits to the dedicated /search results page */}
           <form onSubmit={handleSearchSubmit} className="max-w-3xl mx-auto">
-            <div className="relative flex items-center bg-dark-800/90 rounded-2xl border border-electric-500/40 hover:border-electric-500 focus-within:border-electric-500 focus-within:ring-2 focus-within:ring-electric-500/30 shadow-glow-sm transition-all duration-300 p-2">
-              {/* Search Icon on RTL right */}
-              <div className="pl-2 pr-3 text-electric-400">
+            <div className="relative flex items-center bg-dark-800/90 rounded-2xl border border-electric-500/40 hover:border-electric-500 focus-within:border-electric-500 focus-within:ring-2 focus-within:ring-electric-500/30 shadow-glow-sm transition-all duration-300 p-1.5 sm:p-2">
+              {/* Search Icon on RTL right (hidden on tiny screens to save space) */}
+              <div className="hidden sm:block pl-2 pr-3 text-electric-400">
                 <Search className="w-6 h-6" />
               </div>
 
               {/* Text input */}
               <input
                 type="text"
-                placeholder="عنوان اسکریپت، بازی یا ویژگی مورد نظر خود را جستجو کنید..."
-                value={filters.query}
-                onChange={(e) => setFilters((prev) => ({ ...prev, query: e.target.value }))}
-                className="w-full bg-transparent text-white placeholder-slate-400 px-2 py-3 text-sm sm:text-base focus:outline-none"
+                placeholder="جستجوی اسکریپت، بازی یا ویژگی..."
+                value={searchFilters.query}
+                onChange={(e) =>
+                  setSearchFilters((prev) => ({ ...prev, query: e.target.value }))
+                }
+                className="w-full min-w-0 bg-transparent text-white placeholder-slate-400 px-1.5 sm:px-2 py-2.5 sm:py-3 text-sm sm:text-base focus:outline-none"
               />
 
               {/* Action Buttons on Left */}
-              <div className="flex items-center gap-2 pr-2 border-r border-white/10">
+              <div className="flex items-center gap-1.5 sm:gap-2 pr-1.5 sm:pr-2 border-r border-white/10 shrink-0">
                 {/* Advanced search modal button (sliders icon as required by prompt) */}
                 <button
                   type="button"
                   onClick={() => setIsAdvancedModalOpen(true)}
                   title="تنظیمات جستجوی پیشرفته"
-                  className="p-2.5 rounded-xl bg-dark-900/80 hover:bg-dark-700 text-electric-400 hover:text-white border border-electric-500/30 transition-all shrink-0"
+                  className="p-2 sm:p-2.5 rounded-xl bg-dark-900/80 hover:bg-dark-700 text-electric-400 hover:text-white border border-electric-500/30 transition-all shrink-0"
                 >
-                  <SlidersHorizontal className="w-5 h-5" />
+                  <SlidersHorizontal className="w-4 h-4 sm:w-5 sm:h-5" />
                 </button>
 
                 {/* Button labeled "جستجو" */}
                 <button
                   type="submit"
-                  className="px-6 py-3 rounded-xl bg-gradient-to-r from-electric-600 to-electric-500 hover:from-electric-500 hover:to-electric-400 text-dark-900 font-black text-sm shadow-glow-sm hover:shadow-glow transition-all shrink-0"
+                  className="px-3.5 sm:px-6 py-2.5 sm:py-3 rounded-xl bg-gradient-to-r from-electric-600 to-electric-500 hover:from-electric-500 hover:to-electric-400 text-dark-900 font-black text-xs sm:text-sm shadow-glow-sm hover:shadow-glow transition-all shrink-0"
                 >
                   جستجو
                 </button>
@@ -258,8 +200,10 @@ export const HomePage: React.FC<{ onOpenAuthModal: () => void }> = ({ onOpenAuth
               <label className="inline-flex items-center gap-2 cursor-pointer select-none text-xs sm:text-sm text-slate-300 hover:text-white transition-colors">
                 <input
                   type="checkbox"
-                  checked={filters.exactMatch}
-                  onChange={(e) => handleExactMatchToggle(e.target.checked)}
+                  checked={searchFilters.exactMatch}
+                  onChange={(e) =>
+                    setSearchFilters((prev) => ({ ...prev, exactMatch: e.target.checked }))
+                  }
                   className="w-4 h-4 accent-electric-500 rounded cursor-pointer"
                 />
                 <span>سخت‌گیری در جستجو (نتیجه دقیقاً با ورودی برابر باشد)</span>
@@ -326,17 +270,73 @@ export const HomePage: React.FC<{ onOpenAuthModal: () => void }> = ({ onOpenAuth
         </div>
       </section>
 
-      {/* Recent scripts and search results Section */}
+      {/* ============ اسکریپت های ادمین (admin uploads only) ============ */}
+      {adminScripts.length > 0 && (
+        <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-2 pt-2">
+          <div className="relative rounded-3xl border border-amber-400/40 bg-gradient-to-b from-amber-500/[0.07] via-dark-800/40 to-transparent p-4 sm:p-6 shadow-[0_0_35px_rgba(251,191,36,0.10)]">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-5 border-b border-amber-400/20 pb-4">
+              <div>
+                <h2 className="text-xl sm:text-2xl font-black text-white flex items-center gap-2">
+                  <Crown className="w-6 h-6 text-amber-400" />
+                  <span>اسکریپت های ادمین</span>
+                </h2>
+                <p className="text-xs text-slate-400 mt-1">
+                  اسکریپت‌هایی که مستقیماً توسط مدیران سایت آپلود شده‌اند 👑
+                </p>
+              </div>
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-400/10 border border-amber-400/40 text-amber-300 text-[11px] font-bold">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                آپلودهای رسمی مدیریت
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-6">
+              {adminScripts.map((script) => (
+                <ScriptCard
+                  key={script.id}
+                  script={script}
+                  onRefresh={() => fetchAdminScripts(adminExpanded)}
+                />
+              ))}
+            </div>
+
+            {(adminHasMore || adminExpanded) && (
+              <div className="mt-8 text-center">
+                {adminHasMore && (
+                  <button
+                    onClick={() => {
+                      setAdminExpanded(true);
+                      fetchAdminScripts(true);
+                    }}
+                    className="px-8 py-3 rounded-xl bg-amber-400/10 border border-amber-400/50 hover:border-amber-300 hover:bg-amber-400/20 text-amber-300 hover:text-amber-200 font-bold text-sm transition-all"
+                  >
+                    مشاهده بیشتر
+                  </button>
+                )}
+                {adminExpanded && (
+                  <button
+                    onClick={() => {
+                      setAdminExpanded(false);
+                      fetchAdminScripts(false);
+                    }}
+                    className="px-8 py-3 rounded-xl bg-dark-800 border border-white/15 hover:border-amber-400/50 text-slate-300 hover:text-white font-bold text-sm transition-all"
+                  >
+                    مشاهده کمتر
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+
+      {/* Recent scripts Section */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-8 border-b border-white/10 pb-6">
           <div>
             <h2 className="text-2xl font-black text-white flex items-center gap-2">
               <span className="w-3 h-3 rounded-full bg-electric-500 animate-pulse" />
-              <span>
-                {filters.query || filters.verifiedOnly || filters.allGames || filters.patchedOnly
-                  ? 'نتایج جستجوی اسکریپت‌ها'
-                  : 'اسکریپت‌های اخیر'}
-              </span>
+              <span>اسکریپت‌های اخیر</span>
             </h2>
             <p className="text-xs text-slate-400 mt-1">
               مجموعه‌ای از جدیدترین و محبوب‌ترین اسکریپت‌های روبلاکس بارگذاری‌شده توسط کاربران
@@ -352,27 +352,28 @@ export const HomePage: React.FC<{ onOpenAuthModal: () => void }> = ({ onOpenAuth
               <RefreshCw className="w-4 h-4" />
             </button>
 
-            {/* Required visible button: "آپلود اسکریپت" */}
+            {/* Required visible button: "آپلود اسکریپت" — compact on mobile */}
             <Link
               to="/upload"
-              className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-electric-600 to-electric-500 hover:from-electric-500 hover:to-electric-400 text-dark-900 font-bold text-sm shadow-glow-sm hover:shadow-glow transition-all"
+              title="آپلود اسکریپت"
+              className="flex items-center gap-2 px-3 sm:px-5 py-2 sm:py-2.5 rounded-xl bg-gradient-to-r from-electric-600 to-electric-500 hover:from-electric-500 hover:to-electric-400 text-dark-900 font-bold text-xs sm:text-sm shadow-glow-sm hover:shadow-glow transition-all shrink-0"
             >
               <Upload className="w-4 h-4" />
-              <span>آپلود اسکریپت</span>
+              <span className="hidden min-[420px]:inline">آپلود اسکریپت</span>
             </Link>
           </div>
         </div>
 
         {/* Loading Skeleton / Grid */}
         {loading && scripts.length === 0 ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-6">
             {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => (
               <div key={n} className="rounded-2xl bg-dark-800/60 border border-white/10 aspect-video animate-pulse" />
             ))}
           </div>
         ) : scripts.length > 0 ? (
           <>
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-6">
               {scripts.map((script) => (
                 <ScriptCard
                   key={script.id}
@@ -390,7 +391,7 @@ export const HomePage: React.FC<{ onOpenAuthModal: () => void }> = ({ onOpenAuth
                   disabled={loading}
                   className="px-8 py-3 rounded-xl bg-dark-800 border border-electric-500/40 hover:border-electric-500 text-electric-400 hover:text-white font-bold text-sm shadow-sm transition-all disabled:opacity-50"
                 >
-                  {loading ? 'در حال بارگذاری...' : 'نمایش اسکریپت‌های بیشتر'}
+                  {loading ? 'در حال بارگذاری...' : 'مشاهده بیشتر'}
                 </button>
               </div>
             )}
@@ -402,44 +403,40 @@ export const HomePage: React.FC<{ onOpenAuthModal: () => void }> = ({ onOpenAuth
               <Search className="w-10 h-10 text-electric-500/70" />
             </div>
             <h3 className="text-lg font-bold text-white mb-2">
-              اسکریپتی با این مشخصات یافت نشد
+              هنوز اسکریپتی منتشر نشده است
             </h3>
             <p className="text-sm text-slate-400 mb-6">
-              می‌توانید فیلترهای جستجو را بازنشانی کنید یا اولین کاربری باشید که در این بخش اسکریپت آپلود می‌کند!
+              اولین کاربری باشید که در این بخش اسکریپت آپلود می‌کند!
             </p>
             <div className="flex flex-wrap items-center justify-center gap-3">
               <button
-                onClick={() => {
-                  setFilters(defaultFilters);
-                  setTimeout(() => fetchScripts(1, false), 50);
-                }}
+                onClick={() => fetchScripts(1, false)}
+                className="px-4 py-2 rounded-xl bg-dark-700 hover:bg-dark-600 text-slate-200 text-xs font-bold transition-colors"
+              >
+                تلاش مجدد
+              </button>
+              <Link
+                to="/search"
                 className="px-4 py-2 rounded-xl bg-dark-700 hover:bg-dark-600 text-slate-200 text-xs font-bold transition-colors"
               >
                 مشاهده همه اسکریپت‌ها
-              </button>
-
-              <button
-                onClick={handleSeed}
-                className="px-4 py-2 rounded-xl bg-electric-500/20 hover:bg-electric-500/30 border border-electric-500/50 text-electric-400 text-xs font-bold transition-all flex items-center gap-1.5"
-              >
-                <Sparkles className="w-4 h-4" />
-                <span>تزریق اسکریپت‌های نمونه برای تست</span>
-              </button>
+              </Link>
             </div>
           </div>
         )}
       </section>
 
-      {/* Advanced Search Modal */}
+      {/* Advanced Search Modal — applying it opens the dedicated results page */}
       <AdvancedSearchModal
         isOpen={isAdvancedModalOpen}
         onClose={() => setIsAdvancedModalOpen(false)}
-        filters={filters}
+        filters={searchFilters}
         onApply={(newFilters) => {
-          setFilters(newFilters);
+          setSearchFilters(newFilters);
+          goToSearch(newFilters);
         }}
         onReset={() => {
-          setFilters(defaultFilters);
+          setSearchFilters(defaultFilters);
         }}
       />
     </div>

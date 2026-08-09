@@ -1,12 +1,22 @@
 import { createClient } from '@supabase/supabase-js';
-import { Script } from '../types';
+import { toPersianMessage } from './errors';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://feqlwhjvnhtbijwevsqk.supabase.co';
-// The anon key must never be empty — createClient() throws "supabaseKey is
-// required" and the whole app dies with a blank screen. Environment variables
-// (web/.env) override these defaults; the fallbacks keep the APK working.
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY ||
+// NOTE: The Supabase anon (public) key is safe to expose in the browser —
+// access is enforced by Row-Level Security on the server. These fallbacks keep
+// the app working even when the VITE_* env vars were not set at build time.
+// IMPORTANT: an empty key makes createClient() throw at module load, which
+// crashes React before it mounts (causing a blank white page). Never leave it empty!
+const supabaseUrl =
+  import.meta.env.VITE_SUPABASE_URL || 'https://feqlwhjvnhtbijwevsqk.supabase.co';
+const supabaseAnonKey =
+  import.meta.env.VITE_SUPABASE_ANON_KEY ||
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZlcWx3aGp2bmh0Ymlqd2V2c3FrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU4NjEzMDcsImV4cCI6MjEwMTQzNzMwN30.AspYCY2j15XvWx4bOM31oU3jUEh72fOu0vyErKOGW1Q';
+
+if (!import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_ANON_KEY) {
+  console.warn(
+    '⚠️ VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY env vars are missing — using built-in fallbacks. Set them in Render → Environment for production.'
+  );
+}
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
@@ -17,45 +27,113 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 
 export const STORAGE_BUCKET = import.meta.env.VITE_STORAGE_BUCKET || 'script-thumbnails';
 
-// Generate a random session ID for online presence tracking
+// Generate a persistent session ID for online presence tracking.
+// Stored in localStorage (not sessionStorage) so 10 open tabs of the same
+// browser count as ONE online visitor instead of 10 fake ones.
 const getSessionId = (): string => {
-  let sessionId = sessionStorage.getItem('roblox_script_session_id');
+  let sessionId = localStorage.getItem('roblox_script_session_id');
   if (!sessionId) {
     sessionId = 'sess_' + Math.random().toString(36).substring(2, 15) + Date.now().toString(36);
-    sessionStorage.setItem('roblox_script_session_id', sessionId);
+    localStorage.setItem('roblox_script_session_id', sessionId);
   }
   return sessionId;
 };
 
-// Send heartbeat to track active online users & guests
+// A visitor is considered "online" if they pinged within this window
+const ONLINE_WINDOW_MINUTES = 5;
+
+const getOnlineSinceISO = () =>
+  new Date(Date.now() - ONLINE_WINDOW_MINUTES * 60 * 1000).toISOString();
+
+let warnedAboutPresenceSetup = false;
+const warnPresenceSetupOnce = (err: any) => {
+  if (!warnedAboutPresenceSetup) {
+    warnedAboutPresenceSetup = true;
+    console.warn(
+      '⚠️ Presence RPC not available — falling back to direct table access. ' +
+        'For best results run supabase_setup.sql in your Supabase SQL Editor.',
+      err?.message || err
+    );
+  }
+};
+
+// Send heartbeat to track active online users & guests.
+// Tries the SECURITY DEFINER RPC first; falls back to a direct upsert
+// (the "Anyone can insert or update presence" RLS policy allows it).
 export const sendHeartbeat = async (userId?: string | null) => {
   try {
     const sessionId = getSessionId();
     const isGuest = !userId;
-    await supabase.rpc('heartbeat_presence', {
+    const { error } = await supabase.rpc('heartbeat_presence', {
       p_session_id: sessionId,
       p_user_id: userId || null,
       p_is_guest: isGuest,
     });
+
+    if (error) {
+      warnPresenceSetupOnce(error);
+      // Direct fallback: upsert presence row + clean up stale ones
+      await supabase.from('online_presence').upsert(
+        {
+          session_id: sessionId,
+          user_id: userId || null,
+          is_guest: isGuest,
+          last_seen: new Date().toISOString(),
+        },
+        { onConflict: 'session_id' }
+      );
+    }
   } catch (err) {
-    // Silently handle if RPC is not yet created in Supabase
+    // Presence tracking must never break the app
   }
 };
 
-// Fetch real online counts from Supabase (or fallback to simulated active counts)
+// Fetch REAL online counts from Supabase (only visitors pinged in the last
+// 5 minutes count as online — never fake or "total" numbers).
 export const getOnlineCounts = async (): Promise<{ registeredUsers: number; guestUsers: number }> => {
+  // 1) Preferred: RPC (also purges stale rows server-side)
   try {
     const { data, error } = await supabase.rpc('get_online_counts');
     if (!error && data && data.length > 0) {
       return {
-        registeredUsers: Number(data[0].registered_users || 1),
-        guestUsers: Number(data[0].guest_users || 3),
+        registeredUsers: Number(data[0].registered_users) || 0,
+        guestUsers: Number(data[0].guest_users) || 0,
+      };
+    }
+    if (error) warnPresenceSetupOnce(error);
+  } catch (err) {
+    // fall through to the direct query
+  }
+
+  // 2) Fallback: count recent rows directly (respects the 5-minute online window)
+  try {
+    const since = getOnlineSinceISO();
+    const [{ count: registered }, { count: guests }] = await Promise.all([
+      supabase
+        .from('online_presence')
+        .select('session_id', { count: 'exact', head: true })
+        .eq('is_guest', false)
+        .gte('last_seen', since),
+      supabase
+        .from('online_presence')
+        .select('session_id', { count: 'exact', head: true })
+        .or('is_guest.eq.true,user_id.is.null')
+        .gte('last_seen', since),
+    ]);
+
+    if (registered !== null || guests !== null) {
+      // Show at least yourself — you are obviously online right now
+      return {
+        registeredUsers: registered ?? 0,
+        guestUsers: Math.max(1, guests ?? 0),
       };
     }
   } catch (err) {
-    // Ignore RPC error
+    // fall through
   }
-  return { registeredUsers: 2, guestUsers: 14 };
+
+  // 3) Last resort: at least show yourself (never fabricated totals)
+  return { registeredUsers: 0, guestUsers: 1 };
 };
 
 // Upload thumbnail image to Supabase Storage
@@ -81,7 +159,7 @@ export const uploadThumbnail = async (file: File): Promise<string> => {
       });
 
     if (fallbackError) {
-      throw new Error(uploadError.message || 'خطا در آپلود تصویر بندانگشتی');
+      throw new Error(toPersianMessage(uploadError.message, 'خطا در آپلود تصویر بندانگشتی'));
     }
     const { data } = supabase.storage.from('script-thumbnails').getPublicUrl(filePath);
     return data.publicUrl;
@@ -89,97 +167,4 @@ export const uploadThumbnail = async (file: File): Promise<string> => {
 
   const { data } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(filePath);
   return data.publicUrl;
-};
-
-// Seed sample demo scripts into Supabase for testing if DB is empty
-export const seedSampleScripts = async (userId: string): Promise<boolean> => {
-  try {
-    const sampleScripts = [
-      {
-        author_id: userId,
-        title: 'اسکریپت اتوفارم و اسپید بلکس فروت (Blox Fruits Auto-Farm)',
-        game_id: '2753915549',
-        game_name: 'Blox Fruits',
-        is_hub_or_universal: false,
-        script_type: 'free',
-        supported_games: ['Blox Fruits', 'King Legacy'],
-        features: 'اتوفارم خودکار لول و کوئست‌ها، جمع‌آوری سریع میوه‌های شیطانی، تله‌پورت سریع بین جزیره‌ها، اسپید هک و وال‌هک بدون لگ.',
-        tags: ['Blox Fruits', 'AutoFarm', 'ESP', 'Speed', 'لِوِل آپ'],
-        script_content: `-- Blox Fruits Ultimate Auto-Farm & ESP Hub
--- Created for Roblox Script Community Platform
-loadstring(game:HttpGet("https://raw.githubusercontent.com/example/robloxscript/main/bloxfruits.lua"))()
-print("Blox Fruits Script Loaded Successfully!")`,
-        commit_message: 'بهبود سرعت اتوفارم و رفع باگ جزیره سوم',
-        visibility: 'public',
-        key_requirement: 'keyless',
-        is_patched: false,
-        is_verified: true,
-        slug: 'blox-fruits-autofarm-hub-' + Math.random().toString(36).substring(2, 7),
-        status: 'published',
-        view_count: 1420,
-        like_count: 312,
-        dislike_count: 8,
-        favorite_count: 95,
-      },
-      {
-        author_id: userId,
-        title: 'اسکریپت هاب عمومی آرسنال (Universal FPS & Aimbot Hub)',
-        game_id: '286090429',
-        game_name: 'Arsenal',
-        is_hub_or_universal: true,
-        script_type: 'free',
-        supported_games: ['Arsenal', 'Phantom Forces', 'BedWars', 'Counter Blox'],
-        features: 'ایم‌بات پیشرفته با قابلیت Silent Aim، ای‌اس‌پی (ESP) دشمنان با نمایش فاصله و نوار سلامت، تنظیم خودکار زاویه تیراندازی و آنتی لگ.',
-        tags: ['Aimbot', 'ESP', 'Universal Hub', 'FPS', 'آرسنال'],
-        script_content: `-- Universal FPS Aimbot & Visuals Hub
--- Works across 15+ popular FPS games on Roblox
-local getasset = getsynasset or getcustomasset
-print("Universal Hub Loaded! Press RIGHT SHIFT to toggle GUI.")`,
-        commit_message: 'پشتیبانی از آپدیت جدید آنتی چیت بازی',
-        visibility: 'public',
-        key_requirement: 'key_required',
-        is_patched: false,
-        is_verified: true,
-        slug: 'universal-fps-aimbot-hub-' + Math.random().toString(36).substring(2, 7),
-        status: 'published',
-        view_count: 2890,
-        like_count: 540,
-        dislike_count: 22,
-        favorite_count: 210,
-      },
-      {
-        author_id: userId,
-        title: 'اسکریپت شبیه‌ساز پت ایکس (Pet Simulator X Auto-Hatch)',
-        game_id: '6284583030',
-        game_name: 'Pet Simulator X',
-        is_hub_or_universal: false,
-        script_type: 'free',
-        supported_games: ['Pet Simulator X', 'Pet Simulator 99'],
-        features: 'باز کردن خودکار تخم‌ها (Auto-Hatch 8x)، ادغام پت‌ها با سرعت بالا، جمع‌آوری تمام سکه‌ها و الماس‌های اطراف نقشه.',
-        tags: ['Pet Simulator', 'AutoHatch', 'Gems', 'تخم‌گذاری خودکار'],
-        script_content: `-- Pet Simulator X & 99 Auto-Hatch Pro Script
-local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/example/ui/main.lua"))()
-Library:Notify("اسکریپت با موفقیت فعال شد!")`,
-        commit_message: 'افزودن قابلیت جمع‌آوری الماس‌های غول‌پیکر',
-        visibility: 'public',
-        key_requirement: 'keyless',
-        is_patched: false,
-        is_verified: false,
-        slug: 'pet-sim-x-auto-hatch-' + Math.random().toString(36).substring(2, 7),
-        status: 'published',
-        view_count: 850,
-        like_count: 120,
-        dislike_count: 4,
-        favorite_count: 38,
-      },
-    ];
-
-    for (const item of sampleScripts) {
-      await supabase.from('scripts').insert(item);
-    }
-    return true;
-  } catch (err) {
-    console.error('Error seeding demo scripts:', err);
-    return false;
-  }
 };

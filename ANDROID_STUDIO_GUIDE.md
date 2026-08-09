@@ -201,7 +201,7 @@ Enable it once from the GitHub website (takes 30 seconds):
 |---|---|
 | Gradle sync fails | Check internet. `File → Invalidate Caches… → Invalidate and Restart`. Make sure Gradle JDK is 17+ (Settings → Build Tools → Gradle). |
 | "SDK location not found" | Settings → Appearance & Behavior → System Settings → Android SDK → install **Android 14 (API 34)** platform + Build-Tools, then sync again. |
-| App opens but is blank/white | Check that `app/src/main/assets/www/index.html` exists. If missing, copy `web/dist/*` there and rebuild. |
+| App opens but is blank/white (progress bar fills, then nothing) | This was a bug in older versions of the project — the bundled JS/CSS files weren't found. **Update the project code** (re-download the ZIP from the branch, or `git pull`) and rebuild the APK. If it still happens, check that `app/src/main/assets/www/index.html` exists. |
 | Login fails | Your Supabase free project may be **paused** (free tier pauses after ~1 week of inactivity) — open the Supabase dashboard and *Restore project*. |
 | "App not installed" | A previous install used a different signature — uninstall the old app first. |
 | Persian fonts look wrong | Fonts (Vazirmatn) load from Google Fonts on first open — they need internet once, then are cached. |

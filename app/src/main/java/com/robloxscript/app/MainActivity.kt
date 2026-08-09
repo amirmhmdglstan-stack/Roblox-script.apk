@@ -2,10 +2,10 @@ package com.robloxscript.app
 
 import android.annotation.SuppressLint
 import android.content.Intent
-import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Bundle
 import android.view.View
+import android.webkit.MimeTypeMap
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -16,6 +16,7 @@ import android.widget.ProgressBar
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.webkit.WebViewAssetLoader
+import java.io.IOException
 
 /**
  * Roblox Script — Android app.
@@ -24,13 +25,19 @@ import androidx.webkit.WebViewAssetLoader
  * `app/src/main/assets/www` and served locally through WebViewAssetLoader,
  * exactly like a normal website — so the app looks and behaves 100% like
  * the original web project, even offline.
+ *
+ * The bundled site's HTML references its files with absolute paths
+ * (e.g. "/assets/index-<hash>.js"), so we register the path handler on "/"
+ * with the "www" asset folder as root. That way:
+ *   https://appassets.androidplatform.net/index.html        -> assets/www/index.html
+ *   https://appassets.androidplatform.net/assets/index.js   -> assets/www/assets/index.js
  */
 class MainActivity : AppCompatActivity() {
 
     companion object {
         /** Host used to serve the bundled web app (Google's official local WebView host). */
         private const val APP_HOST = "appassets.androidplatform.net"
-        private const val LOCAL_INDEX = "https://$APP_HOST/assets/www/index.html"
+        private const val LOCAL_INDEX = "https://$APP_HOST/index.html"
 
         /**
          * OPTIONAL — remote mode.
@@ -46,8 +53,45 @@ class MainActivity : AppCompatActivity() {
 
     private val assetLoader: WebViewAssetLoader by lazy {
         WebViewAssetLoader.Builder()
-            .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(this))
+            .addPathHandler("/", object : WebViewAssetLoader.PathHandler {
+                override fun handle(path: String): WebResourceResponse? {
+                    // path is like "/index.html" or "/assets/index-<hash>.js"
+                    // (ignore any query string / fragment just in case)
+                    val cleanPath = path.substringBefore('?').substringBefore('#')
+                    val assetPath = "www" + cleanPath
+                    return try {
+                        val stream = assets.open(assetPath)
+                        WebResourceResponse(guessMimeType(assetPath), null, stream)
+                    } catch (e: IOException) {
+                        null // file not found -> WebView will fall back to onReceivedError
+                    }
+                }
+            })
             .build()
+    }
+
+    private fun guessMimeType(path: String): String {
+        val ext = path.substringAfterLast('.', "").lowercase()
+        return when (ext) {
+            "html", "htm" -> "text/html; charset=utf-8"
+            "js", "mjs" -> "application/javascript"
+            "css" -> "text/css; charset=utf-8"
+            "svg" -> "image/svg+xml"
+            "png" -> "image/png"
+            "jpg", "jpeg" -> "image/jpeg"
+            "webp" -> "image/webp"
+            "gif" -> "image/gif"
+            "ico" -> "image/x-icon"
+            "json" -> "application/json"
+            "txt" -> "text/plain; charset=utf-8"
+            "woff" -> "font/woff"
+            "woff2" -> "font/woff2"
+            "ttf" -> "font/ttf"
+            "xml" -> "application/xml"
+            "wasm" -> "application/wasm"
+            else -> MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext)
+                ?: "application/octet-stream"
+        }
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -73,7 +117,7 @@ class MainActivity : AppCompatActivity() {
 
         webView.webViewClient = object : WebViewClient() {
 
-            // Serve the bundled web app from assets/ (https://appassets.androidplatform.net)
+            // Serve the bundled web app from assets/www at the root of the local host
             override fun shouldInterceptRequest(
                 view: WebView,
                 request: WebResourceRequest
@@ -86,8 +130,15 @@ class MainActivity : AppCompatActivity() {
                 request: WebResourceRequest
             ): Boolean {
                 val url: Uri = request.url
-                // The bundled app itself loads normally
-                if (url.host == APP_HOST) return false
+                if (url.host == APP_HOST) {
+                    // Links like href="/" -> open the app's index.html instead of a folder
+                    if (url.path.isNullOrEmpty() || url.path == "/") {
+                        view.loadUrl(LOCAL_INDEX)
+                        return true
+                    }
+                    // Everything else inside the bundled app loads normally
+                    return false
+                }
                 // Any external link opens in the phone's default browser
                 return try {
                     startActivity(Intent(Intent.ACTION_VIEW, url))

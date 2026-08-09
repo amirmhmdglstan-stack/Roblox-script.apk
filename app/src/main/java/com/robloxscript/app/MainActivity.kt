@@ -295,7 +295,8 @@ class MainActivity : AppCompatActivity() {
                 "&status=eq.published&visibility=eq.public&order=view_count.desc&limit=40"
             val body = getJson(
                 url,
-                mapOf("apikey" to SUPABASE_ANON_KEY, "Authorization" to "Bearer $SUPABASE_ANON_KEY")
+                mapOf("apikey" to SUPABASE_ANON_KEY, "Authorization" to "Bearer $SUPABASE_ANON_KEY"),
+                8000
             )
             if (body != null) {
                 val arr = JSONArray(body)

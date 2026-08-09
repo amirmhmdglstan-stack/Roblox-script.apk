@@ -2,7 +2,11 @@ import { createClient } from '@supabase/supabase-js';
 import { Script } from '../types';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://feqlwhjvnhtbijwevsqk.supabase.co';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+// The anon key must never be empty — createClient() throws "supabaseKey is
+// required" and the whole app dies with a blank screen. Environment variables
+// (web/.env) override these defaults; the fallbacks keep the APK working.
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY ||
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZlcWx3aGp2bmh0Ymlqd2V2c3FrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU4NjEzMDcsImV4cCI6MjEwMTQzNzMwN30.AspYCY2j15XvWx4bOM31oU3jUEh72fOu0vyErKOGW1Q';
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {

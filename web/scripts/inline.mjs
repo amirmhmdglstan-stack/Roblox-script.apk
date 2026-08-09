@@ -41,13 +41,20 @@ html = html.replace(
 );
 
 // ── Inline all local scripts (classic or module — both become classic) ──────
+// IMPORTANT: the app script must run AFTER <div id="root"> exists. Classic
+// scripts execute synchronously, so if we leave the script in <head> (where
+// Vite puts it as a deferred module), React's createRoot(document.getElementById
+// ('root')) finds nothing and the app crashes with a blank screen. We therefore
+// capture the app script here and re-insert it at the very end of <body>.
+let appScript = '';
 html = html.replace(
   /<script[^>]*src="([^"]+)"[^>]*><\/script>/g,
   (_m, src) => {
     const file = resolve(dist, src.replace(/^\.\//, ''));
     let js = readFileSync(file, 'utf8');
     js = js.replace(/<\/script/gi, '<\\/script');
-    return `<script>\n${js}\n</script>`;
+    appScript = `<script>\n${js}\n</script>`;
+    return ''; // removed from <head>; re-added before </body> below
   }
 );
 
@@ -92,6 +99,11 @@ const errorOverlay = `<script>
 // Inject the error reporter as the very first thing in <head>, so it catches
 // errors from the app script that follows.
 html = html.replace('<head>', '<head>' + errorOverlay);
+
+// ── The app script goes at the very end of <body>, after <div id="root"> ──
+if (appScript) {
+  html = html.replace('</body>', appScript + '</body>');
+}
 
 // ── Write the single file (and clean the folder — only index.html is needed) ──
 mkdirSync(outDir, { recursive: true });

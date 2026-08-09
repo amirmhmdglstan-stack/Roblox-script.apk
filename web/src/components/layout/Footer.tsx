@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { seedSampleScripts } from '../../lib/supabase';
 import { ShieldAlert, Terminal, Sparkles, Heart } from 'lucide-react';
@@ -47,19 +48,19 @@ export const Footer: React.FC = () => {
             <h4 className="text-sm font-bold text-white mb-3">دسترسی سریع</h4>
             <ul className="space-y-2 text-sm text-slate-400">
               <li>
-                <a href="/" className="hover:text-electric-400 transition-colors">
+                <Link to="/" className="hover:text-electric-400 transition-colors">
                   صفحه اصلی و جستجوی اسکریپت
-                </a>
+                </Link>
               </li>
               <li>
-                <a href="/upload" className="hover:text-electric-400 transition-colors">
+                <Link to="/upload" className="hover:text-electric-400 transition-colors">
                   آپلود و انتشار اسکریپت جدید
-                </a>
+                </Link>
               </li>
               <li>
-                <a href="/dashboard" className="hover:text-electric-400 transition-colors">
+                <Link to="/dashboard" className="hover:text-electric-400 transition-colors">
                   مدیریت اسکریپت‌های من و علاقه‌مندی‌ها
-                </a>
+                </Link>
               </li>
             </ul>
           </div>

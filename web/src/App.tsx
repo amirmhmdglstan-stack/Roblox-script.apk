@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { HashRouter, Routes, Route } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import { Navbar } from './components/layout/Navbar';
 import { Footer } from './components/layout/Footer';
@@ -16,7 +16,7 @@ export function App() {
 
   return (
     <AuthProvider>
-      <BrowserRouter>
+      <HashRouter>
         <div className="min-h-screen flex flex-col bg-dark-900 text-slate-100 selection:bg-electric-500 selection:text-dark-900">
           <Navbar onOpenAuthModal={() => setIsAuthModalOpen(true)} />
 
@@ -68,7 +68,7 @@ export function App() {
             }}
           />
         </div>
-      </BrowserRouter>
+      </HashRouter>
     </AuthProvider>
   );
 }

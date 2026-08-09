@@ -8,19 +8,27 @@ Build the **Roblox Script** website as an Android APK, step by step.
 
 ## 1. What you are building
 
-The APK is a **WebView app** that contains your *entire* web project bundled inside it
-(`app/src/main/assets/www`). When you open the app you see the real Roblox Script
-platform — same dark/electric-cyan design, same RTL Persian UI, same Supabase
-auth, uploads, search, likes and favorites. No server is needed because the web
-app talks directly to your Supabase project (exactly like the website does).
+The APK is a **real native Android app** (not a PWA, not a link to a website).
+It contains a native Android shell (`MainActivity`), your launcher icon, and the
+**entire application bundled inside the APK** at `app/src/main/assets/www`.
+When you open the app you see the real Roblox Script platform — same
+dark/electric-cyan design, same RTL Persian UI, same Supabase auth, uploads,
+search, likes and favorites.
+
+- Everything is loaded **straight from the APK file** (`file:///android_asset/...`)
+  — no server, no special tricks, works on every Android device, opens even offline.
+- Only **live content** needs internet, exactly like the website itself:
+  scripts & users come from your Supabase database, thumbnails from Supabase
+  Storage, and the Vazirmatn font from Google Fonts (falls back to the system
+  font offline).
 
 | Feature | How it works in the APK |
 |---|---|
+| App UI, all pages, logic | ✅ bundled inside the APK (`assets/www`) — works offline |
 | Login / sign-up | Supabase email+password, same as website |
 | Scripts, search, likes, favorites | Supabase database + RLS policies (already set up by you) |
 | Thumbnail uploads | Supabase Storage bucket `script-thumbnails` |
 | Online counters | `get_online_counts` / `heartbeat_presence` RPCs |
-| Browsing without internet | ✅ bundled site loads offline (login/upload need internet) |
 | Back button | goes back inside the app (browser-style) |
 | External links | open in the phone's default browser |
 
@@ -125,9 +133,11 @@ app/build/outputs/apk/release/app-release.apk
 
 ## 7. How the app works (for curious people)
 
-- `MainActivity.kt` loads the bundled site from `app/src/main/assets/www`
-  using **WebViewAssetLoader** — Google's official, secure way to serve local
-  web content in a WebView (served under `https://appassets.androidplatform.net`).
+- `MainActivity.kt` loads the app straight from the APK file itself
+  (`file:///android_asset/www/index.html`) — no server and no special network
+  tricks, so it works on every Android version and opens even without internet.
+- The site is built with relative asset paths and hash-based routing
+  (`#/upload`, `#/script/...`), which is what makes file-based loading possible.
 - JavaScript, DOM storage and sessions are enabled, so Supabase login stays
   logged in between app launches.
 - The top thin cyan bar shows page-load progress.
@@ -201,7 +211,7 @@ Enable it once from the GitHub website (takes 30 seconds):
 |---|---|
 | Gradle sync fails | Check internet. `File → Invalidate Caches… → Invalidate and Restart`. Make sure Gradle JDK is 17+ (Settings → Build Tools → Gradle). |
 | "SDK location not found" | Settings → Appearance & Behavior → System Settings → Android SDK → install **Android 14 (API 34)** platform + Build-Tools, then sync again. |
-| App opens but is blank/white (progress bar fills, then nothing) | This was a bug in older versions of the project — the bundled JS/CSS files weren't found. **Update the project code** (re-download the ZIP from the branch, or `git pull`) and rebuild the APK. If it still happens, check that `app/src/main/assets/www/index.html` exists. |
+| App opens but is blank/white, or shows "Webpage not available" | You're running an **old build**. This was a bug in earlier versions of the project. **Update the project code** (re-download the ZIP from the branch, or `git pull`), rebuild the APK, uninstall the old app from your phone, and install the new one. The current version loads everything straight from the APK file and works on all devices. |
 | Login fails | Your Supabase free project may be **paused** (free tier pauses after ~1 week of inactivity) — open the Supabase dashboard and *Restore project*. |
 | "App not installed" | A previous install used a different signature — uninstall the old app first. |
 | Persian fonts look wrong | Fonts (Vazirmatn) load from Google Fonts on first open — they need internet once, then are cached. |

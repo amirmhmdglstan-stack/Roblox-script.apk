@@ -17,9 +17,9 @@ like the original web project, straight from your Supabase database.
 │   ├── build.gradle.kts              # Android module config
 │   └── src/main/
 │       ├── AndroidManifest.xml
-│       ├── java/com/robloxscript/app/MainActivity.kt   # WebView host activity
+│       ├── java/com/robloxscript/app/MainActivity.kt   # loads the app from the APK file
 │       ├── res/                       # Theme (dark navy + electric cyan), launcher icon
-│       └── assets/www/                # ⬅ the built web app (from the original project)
+│       └── assets/www/                # ⬅ the entire app (UI + logic), bundled inside the APK
 ├── web/                               # Full source of the web app (buildable)
 │   ├── src/                           # All React + TypeScript pages & components
 │   ├── vite.config.ts                 # (reconstructed — missing in the original repo)

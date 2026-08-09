@@ -45,6 +45,15 @@ Full details, customization options and troubleshooting:
 2. Copy everything from `web/dist/` into `app/src/main/assets/www/`
 3. Rebuild the APK in Android Studio.
 
+## 🤖 Optional: auto-build the APK with GitHub Actions
+
+A ready-made CI workflow is included at [`workflow/build-apk.yml`](workflow/build-apk.yml).
+To enable it: on GitHub, go to **Add file → Create new file**, type
+`.github/workflows/build-apk.yml`, paste the file's contents, and commit.
+Every push then builds the APK in the cloud and uploads it as an artifact
+(`Actions` tab → latest run → *Roblox-Script-APK*). Pushing a tag like
+`v1.0` also creates a GitHub Release with the APK attached.
+
 ## 📝 Notes
 
 - The app talks directly to **Supabase** (same public anon key the website uses),

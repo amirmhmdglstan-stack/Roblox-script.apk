@@ -179,6 +179,22 @@ cp -r web/dist/* app/src/main/assets/www/
 
 ---
 
+## 9.5. Bonus: build the APK automatically with GitHub Actions (no Android Studio needed)
+
+The repo includes a ready-made CI workflow at `workflow/build-apk.yml`.
+Enable it once from the GitHub website (takes 30 seconds):
+
+1. Open your repo on GitHub → **Add file → Create new file**.
+2. Name it exactly: `.github/workflows/build-apk.yml`
+3. Paste the content of `workflow/build-apk.yml` → **Commit**.
+4. From then on, every push builds the APK in the cloud. Open the
+   **Actions** tab → latest run → download the **Roblox-Script-APK** artifact
+   (it's `app-debug.apk` inside).
+5. To get a downloadable release: create a tag (`Releases → Create a new
+   release → Choose a tag → v1.0`). The workflow attaches the APK to the release.
+
+---
+
 ## 10. Troubleshooting
 
 | Problem | Fix |

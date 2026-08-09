@@ -41,8 +41,11 @@ import java.nio.charset.StandardCharsets
  *
  * The website normally runs on a Node/Express server which also proxies some
  * third-party APIs. In this app those endpoints are implemented natively:
- *   /api/exploits, /api/versions/current, /api/sunc  -> WEAO exploit-status API
- *   /api/ai/chat                                      -> free AI (pollinations.ai)
+ *   GET  /api/exploits, /api/versions/current, /api/sunc  -> WEAO exploit-status
+ *        API (intercepted in shouldInterceptRequest, like server.js)
+ *   POST /api/ai/chat (AI assistant «همیار»)               -> exposed to the app
+ *        as a native JS bridge (AndroidBridge.sendChatMessage) — WebView never
+ *        exposes POST bodies to URL interception, so chat goes through the bridge
  * so every feature works inside the APK with no server at all.
  */
 class MainActivity : AppCompatActivity() {
@@ -80,14 +83,65 @@ class MainActivity : AppCompatActivity() {
             filePathCallback = null
         }
 
-    /** Exposed to the app as window.AndroidBridge.copyToClipboard(text). */
+    /**
+     * Exposed to the app as window.AndroidBridge.* — native features that the
+     * web code cannot do on its own inside a WebView.
+     */
     inner class AndroidBridge {
+
         @JavascriptInterface
         fun copyToClipboard(text: String) {
             val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             cm.setPrimaryClip(ClipData.newPlainText("Roblox Script", text))
             runOnUiThread {
                 Toast.makeText(this@MainActivity, "کپی شد", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        /**
+         * The AI assistant («همیار»). Receives { messages: [{role, content}] }
+         * and returns {"reply": "..."} or {"error": "AI_UNAVAILABLE"}.
+         * Runs on the WebView's JS-bridge thread (not the UI thread), so the
+         * blocking network call is safe here.
+         */
+        @JavascriptInterface
+        fun sendChatMessage(messagesJson: String): String {
+            return try {
+                val req = JSONObject(messagesJson)
+                val messages = req.optJSONArray("messages") ?: JSONArray()
+                if (messages.length() == 0) return """{"error":"AI_UNAVAILABLE"}"""
+
+                val trimmed = JSONArray()
+                for (i in maxOf(0, messages.length() - 12) until messages.length()) {
+                    trimmed.put(messages.get(i))
+                }
+
+                val payload = JSONObject()
+                    .put("model", AI_MODEL)
+                    .put("messages", trimmed)
+                    .put("stream", false)
+
+                val conn = URL(AI_URL).openConnection() as HttpURLConnection
+                try {
+                    conn.requestMethod = "POST"
+                    conn.doOutput = true
+                    conn.setRequestProperty("Content-Type", "application/json")
+                    conn.setRequestProperty("Accept", "application/json")
+                    conn.connectTimeout = 10_000
+                    conn.readTimeout = 15_000
+                    conn.outputStream.use { it.write(payload.toString().toByteArray(StandardCharsets.UTF_8)) }
+
+                    if (conn.responseCode !in 200..299) return """{"error":"AI_UNAVAILABLE"}"""
+                    val resp = JSONObject(String(readAll(conn.inputStream), StandardCharsets.UTF_8))
+                    val choices = resp.optJSONArray("choices")
+                    val content = choices?.optJSONObject(0)?.optJSONObject("message")?.optString("content")
+                    if (content.isNullOrBlank()) return """{"error":"AI_UNAVAILABLE"}"""
+                    JSONObject().put("reply", content).toString()
+                } finally {
+                    conn.disconnect()
+                }
+            } catch (e: Exception) {
+                """{"error":"AI_UNAVAILABLE"}"""
             }
         }
     }
@@ -138,9 +192,9 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
 
-                // Serve the app's /api/* endpoints natively (no server needed)
+                // Serve the app's GET /api/* endpoints natively (no server needed)
                 if (url.scheme == "file" && url.path?.startsWith("/api/") == true) {
-                    return handleApi(url, request)
+                    return handleApi(url)
                 }
 
                 return null // everything else: default WebView loading
@@ -243,21 +297,20 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // In-app API endpoints (mirrors server.js)
+    // In-app GET API endpoints (mirrors server.js)
     // ──────────────────────────────────────────────────────────────────────────
 
-    private fun handleApi(url: Uri, request: WebResourceRequest): WebResourceResponse {
+    private fun handleApi(url: Uri): WebResourceResponse {
         val path = url.path ?: return jsonResponse(404, """{"error":"not_found"}""")
-        return when {
-            path == "/api/exploits" -> proxyWeao("/api/status/exploits")
-            path == "/api/versions/current" -> proxyWeao("/api/versions/current")
-            path == "/api/sunc" -> {
+        return when (path) {
+            "/api/exploits" -> proxyWeao("/api/status/exploits")
+            "/api/versions/current" -> proxyWeao("/api/versions/current")
+            "/api/sunc" -> {
                 val scrap = url.getQueryParameter("scrap") ?: ""
                 val key = url.getQueryParameter("key") ?: ""
                 if (scrap.isEmpty() || key.isEmpty()) jsonResponse(400, """{"error":"missing_params"}""")
                 else proxyWeao("/api/sunc?scrap=${Uri.encode(scrap)}&key=${Uri.encode(key)}")
             }
-            path == "/api/ai/chat" && request.method.equals("POST", true) -> handleAiChat(request)
             else -> jsonResponse(404, """{"error":"not_found"}""")
         }
     }
@@ -304,57 +357,6 @@ class MainActivity : AppCompatActivity() {
             if (stale != null) return jsonResponse(200, String(stale.second, StandardCharsets.UTF_8))
         }
         return jsonResponse(502, """{"error":"weao_unavailable"}""")
-    }
-
-    private fun handleAiChat(request: WebResourceRequest): WebResourceResponse {
-        // Read the POST body (JSON { messages: [{role, content}] })
-        val bodyText = try {
-            request.requestBody?.let { String(readAll(it), StandardCharsets.UTF_8) } ?: ""
-        } catch (e: Exception) {
-            ""
-        }
-        if (bodyText.isBlank()) return jsonResponse(400, """{"error":"empty_body"}""")
-
-        return try {
-            val req = JSONObject(bodyText)
-            val messages = req.optJSONArray("messages") ?: JSONArray()
-            if (messages.length() == 0) return jsonResponse(400, """{"error":"no_messages"}""")
-
-            // Keep the last N messages (same cap as server.js)
-            val trimmed = JSONArray()
-            for (i in maxOf(0, messages.length() - 12) until messages.length()) {
-                trimmed.put(messages.get(i))
-            }
-
-            val payload = JSONObject()
-                .put("model", AI_MODEL)
-                .put("messages", trimmed)
-                .put("stream", false)
-
-            val conn = URL(AI_URL).openConnection() as HttpURLConnection
-            try {
-                conn.requestMethod = "POST"
-                conn.doOutput = true
-                conn.setRequestProperty("Content-Type", "application/json")
-                conn.setRequestProperty("Accept", "application/json")
-                conn.connectTimeout = 10_000
-                conn.readTimeout = 30_000
-                conn.outputStream.use { it.write(payload.toString().toByteArray(StandardCharsets.UTF_8)) }
-
-                if (conn.responseCode !in 200..299) {
-                    return jsonResponse(503, """{"error":"AI_UNAVAILABLE"}""")
-                }
-                val resp = JSONObject(String(readAll(conn.inputStream), StandardCharsets.UTF_8))
-                val choices = resp.optJSONArray("choices")
-                val content = choices?.optJSONObject(0)?.optJSONObject("message")?.optString("content")
-                if (content.isNullOrBlank()) return jsonResponse(503, """{"error":"AI_UNAVAILABLE"}""")
-                return jsonResponse(200, JSONObject().put("reply", content).toString())
-            } finally {
-                conn.disconnect()
-            }
-        } catch (e: Exception) {
-            jsonResponse(503, """{"error":"AI_UNAVAILABLE"}""")
-        }
     }
 
     // ──────────────────────────────────────────────────────────────────────────

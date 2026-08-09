@@ -37,7 +37,7 @@ export function App() {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
 
   // Tiny version badge (helps troubleshooting which APK build is installed)
-  const VERSION = '3.0';
+  const VERSION = '3.1';
   React.useEffect(() => {
     try {
       const b = document.createElement('div');

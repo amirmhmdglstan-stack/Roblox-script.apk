@@ -115,6 +115,21 @@ if (appScript) {
   html = html.replace('</body>', appScript + '</body>');
 }
 
+// ── Favicon: inline as a data URI (the APK's single-file app has no other files) ──
+const faviconPath = resolve(dist, 'favicon.svg');
+if (existsSync(faviconPath)) {
+  try {
+    const svg = readFileSync(faviconPath, 'utf8');
+    const dataUri = 'data:image/svg+xml,' + encodeURIComponent(svg);
+    html = html.replace(
+      /<link[^>]*rel="icon"[^>]*>/g,
+      `<link rel="icon" type="image/svg+xml" href="${dataUri}" />`
+    );
+  } catch (e) {
+    // favicon is cosmetic — ignore failures
+  }
+}
+
 // ── Write the single file (and clean the folder — only index.html is needed) ──
 mkdirSync(outDir, { recursive: true });
 for (const f of readdirSafe(outDir)) {

@@ -322,8 +322,12 @@ class MainActivity : AppCompatActivity() {
                 if (m.optString("id") == id) { ranked.put(m); break }
             }
         }
-        return if (ranked.length() > 0) ranked
-        else JSONArray(available.toList().shuffled())
+        if (ranked.length() > 0) return ranked
+        // fallback: shuffled copy
+        val shuffled = JSONArray()
+        val items = (0 until available.length()).map { available.optJSONObject(it) }.shuffled()
+        for (m in items) shuffled.put(m)
+        return shuffled
     }
 
     private fun poolKey(models: JSONArray): String {

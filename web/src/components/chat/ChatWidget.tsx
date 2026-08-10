@@ -17,7 +17,7 @@ const WELCOME_MESSAGE: ChatMessage = {
   role: 'assistant',
   time: nowTime(),
   content:
-    'سلام! 👋 من دستیار هوشمند Roblox Script هستم 🤖\nبا اطلاعات به‌روز اسکریپت‌ها و اکسپلویت‌های سایت کنارت هستم؛ بگو دنبال کدوم بازی یا اکسپلویتی تا بهترین گزینه رو پیشنهاد بدم!',
+    'سلام! 👋 من **همیار**، دستیار هوشمند Roblox Script هستم 🤖\nبه **همه اطلاعات سایت** دسترسی دارم:\n• 📜 همه اسکریپت‌ها (۸۰ تای محبوب + جستجو)\n• 💉 وضعیت اکسپلویت‌ها و درصد UNC/sUNC\n• 👥 ناشران و آپلودکنندگان اسکریپت‌ها\n• 🎮 نسخه‌های فعلی روبلاکس\n\nفقط متن جواب می‌دم (قابلیت ساخت عکس ندارم).\nبگو دنبال اسکریپت کدوم بازی یا کدوم اکسپلویتی؟',
 };
 
 // Floating AI assistant: round FAB at the bottom corner (fixed — does not move
@@ -101,7 +101,7 @@ export const ChatWidget: React.FC = () => {
               <div className="text-sm font-black text-white">همیار • دستیار هوشمند</div>
               <div className="text-[10px] text-electric-400 flex items-center gap-1">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                مسلط بر اسکریپت‌ها و اکسپلویت‌های سایت
+                دسترسی کامل: اسکریپت‌ها، اکسپلویت‌ها، ناشران • فقط متن (بدون عکس)
               </div>
             </div>
           </div>
@@ -190,7 +190,7 @@ export const ChatWidget: React.FC = () => {
             </button>
           </div>
           <p className="text-[9px] text-slate-500 mt-2 text-center">
-            پاسخ‌ها بر اساس داده‌های زنده سایت تولید می‌شود • فقط متن (بدون ساخت تصویر)
+            دسترسی زنده به اسکریپت‌ها، اکسپلویت‌ها و آپلودکنندگان • فقط متن، بدون ساخت تصویر • پاسخ‌ها بر اساس داده‌های لحظه‌ای سایت
           </p>
         </div>
       </div>

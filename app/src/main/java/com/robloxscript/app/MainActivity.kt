@@ -224,13 +224,19 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // ── server.js-equivalent smart AI pool ────────────────────────────────────
+    // ── server.js-equivalent smart AI pool + local fallback (full site access, text-only) ──
 
     private val imageWords = listOf(
         "draw", "paint", "sketch", "illustrate", "render", "generate an image",
         "generate a picture", "create an image", "make an image", "create a picture",
-        "a picture of", "عکس", "تصویر", "نقاشی", "بکش", "طراحی", "بکشید"
+        "a picture of", "عکس", "تصویر", "نقاشی", "بکش", "طراحی", "بکشید",
+        "تصویر بساز", "عکس بساز"
     )
+
+    // Structured caches for offline/local fallback (mirrors server.js getLocalFallbackReply)
+    private var aiCachedScripts = JSONArray()
+    private var aiCachedExploits = JSONArray()
+    private var aiCachedPublishers = JSONArray()
 
     private fun wantsImage(text: String): Boolean {
         val t = text.lowercase()
@@ -250,10 +256,10 @@ class MainActivity : AppCompatActivity() {
     private fun modelUrl(provider: String): String {
         val base = providerBase(provider)
         return when (provider) {
-            "g4f" -> base + "/chat/completions"
-            "pollinations" -> base + "/v1/chat/completions"
-            "huggingface" -> base + "/chat/completions"
-            "openrouter" -> base + "/chat/completions"
+            "g4f" -> base.trimEnd('/') + "/chat/completions"
+            "pollinations" -> base.trimEnd('/') + "/v1/chat/completions"
+            "huggingface" -> base.trimEnd('/') + "/chat/completions"
+            "openrouter" -> base.trimEnd('/') + "/chat/completions"
             else -> ""
         }
     }
@@ -267,14 +273,49 @@ class MainActivity : AppCompatActivity() {
                 .put("model", modelId)
                 .put("messages", messages)
                 .put("stream", false)
-                .put("max_tokens", 500)
+                .put("max_tokens", 700)
+                .put("temperature", 0.7)
             val headers = HashMap<String, String>()
             headers["Content-Type"] = "application/json"
-            providerKey(provider).takeIf { it.isNotBlank() }?.let {
-                headers["Authorization"] = "Bearer $it"
+            headers["Accept"] = "application/json"
+            val key = providerKey(provider)
+            if (key.isNotBlank()) {
+                headers["Authorization"] = "Bearer $key"
+                if (provider == "openrouter") {
+                    headers["HTTP-Referer"] = "https://roblox-script.site"
+                    headers["X-Title"] = "Roblox Script"
+                }
             }
-            val body = postJsonWithHeaders(url, payload, headers, timeoutMs) ?: return null
+            var body = postJsonWithHeaders(url, payload, headers, timeoutMs)
+            if (body == null && provider == "pollinations" && key.isNotBlank()) {
+                val h2 = HashMap<String, String>()
+                h2["Content-Type"] = "application/json"
+                body = postJsonWithHeaders(url, payload, h2, timeoutMs)
+            }
+            if (body == null) return null
             parseChatReply(body)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** Pollinations simple GET text fallback — works without API key */
+    private fun callPollinationsTextFallback(prompt: String): String? {
+        return try {
+            val enc = Uri.encode(prompt.take(1500))
+            val urlStr = "https://gen.pollinations.ai/text/$enc?model=openai"
+            val conn = URL(urlStr).openConnection() as HttpURLConnection
+            try {
+                conn.requestMethod = "GET"
+                conn.setRequestProperty("Accept", "text/plain")
+                conn.connectTimeout = 10000
+                conn.readTimeout = 15000
+                if (conn.responseCode !in 200..299) return null
+                val txt = String(readAll(conn.inputStream), StandardCharsets.UTF_8).trim()
+                if (txt.isBlank()) null else txt
+            } finally {
+                conn.disconnect()
+            }
         } catch (e: Exception) {
             null
         }
@@ -305,7 +346,7 @@ class MainActivity : AppCompatActivity() {
             "one identifier per line, most capable first. No explanations, no extra text."
         val msgs = JSONArray()
             .put(JSONObject().put("role", "system").put("content", sys))
-            .put(JSONObject().put("role", "user").put("content", "Models:\n" + names.mapIndexed { i, n -> "${i + 1}. $n" }.joinToString("\n")))
+            .put(JSONObject().put("role", "user").put("content", "Models:\n" + names.mapIndexed { idx, n -> "${idx + 1}. $n" }.joinToString("\n")))
         val judgeContent = callModel(judge.optString("id"), judge.optString("provider"), msgs, JUDGE_TIMEOUT_MS)
         val order = ArrayList<String>()
         if (judgeContent != null) {
@@ -323,7 +364,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
         if (ranked.length() > 0) return ranked
-        // fallback: shuffled copy
         val shuffled = JSONArray()
         val items = (0 until available.length()).map { available.optJSONObject(it) }.shuffled()
         for (m in items) shuffled.put(m)
@@ -346,7 +386,7 @@ class MainActivity : AppCompatActivity() {
         }
         aiHealthCheckedAt = System.currentTimeMillis()
         val pool = healthCheck()
-        if (pool.length() == 0) return aiRankedModels // keep old ranking if all down
+        if (pool.length() == 0) return aiRankedModels
         val key = poolKey(pool)
         if (key != aiLastPoolKey || aiRankedModels.length() == 0) {
             aiRankedModels = rankByJudge(pool)
@@ -371,6 +411,7 @@ class MainActivity : AppCompatActivity() {
             val j = JSONObject(body)
             val choices = j.optJSONArray("choices")
             val content = choices?.optJSONObject(0)?.optJSONObject("message")?.optString("content")
+                ?: choices?.optJSONObject(0)?.optJSONObject("delta")?.optString("content")
             content?.takeIf { it.isNotBlank() }?.trim()
         } catch (e: Exception) {
             null
@@ -386,9 +427,112 @@ class MainActivity : AppCompatActivity() {
         return true
     }
 
-    /** The full askHamyar pipeline (health -> rank -> answer -> retry once). */
+    /** Local fallback when all AI providers are down — uses cached site data */
+    private fun getLocalFallbackReply(queryText: String): String? {
+        val q = queryText.trim()
+        if (q.isEmpty()) return null
+        val low = q.lowercase()
+
+        val scripts: JSONArray = synchronized(lock) { JSONArray(aiCachedScripts.toString()) }
+        val exploits: JSONArray = synchronized(lock) { JSONArray(aiCachedExploits.toString()) }
+        val publishers: JSONArray = synchronized(lock) { JSONArray(aiCachedPublishers.toString()) }
+
+        fun tokenize(s: String): List<String> = s.lowercase().split(Regex("[\\s,؛،.\\n]+")).filter { it.length > 2 }
+
+        fun scoreScript(s: JSONObject, tokens: List<String>, raw: String): Int {
+            val title = s.optString("title").lowercase()
+            val game = s.optString("game_name").lowercase()
+            val tags = s.optJSONArray("tags")?.let { (0 until it.length()).joinToString(" ") { idx -> it.optString(idx) } }?.lowercase() ?: ""
+            val feats = s.optString("features").lowercase()
+            val hay = "$title $game $tags $feats"
+            var sc = 0
+            for (t in tokens) {
+                if (hay.contains(t)) sc += 2
+                if (game.contains(t)) sc += 3
+                if (title.contains(t)) sc += 3
+            }
+            if (raw.lowercase().contains(game) && game.isNotBlank()) sc += 10
+            return sc
+        }
+
+        if (low.contains("ناشر") || low.contains("پابلیشر") || low.contains("آپلود") || low.contains("uploader") || low.contains("publisher") || low.contains("نویسنده")) {
+            if (publishers.length() == 0 && scripts.length() == 0) {
+                return "در حال حاضر اطلاعات ناشران در دسترس نیست، ولی می‌تونی در بخش اسکریپت‌ها، نام ناشر هر اسکریپت را ببینی. اسکریپت‌های مدیران سایت با برچسب «مدیر سایت» مشخص هستند 👑"
+            }
+            val list = if (publishers.length() > 0) {
+                (0 until minOf(publishers.length(), 8)).map { i -> publishers.getJSONObject(i) }.map { p ->
+                    val icon = if (p.optString("role") == "admin") "👑" else "👤"
+                    "$icon **${p.optString("name")}**${if (p.optString("username").isNotBlank()) " (@${p.optString("username")})" else ""} — ${p.optInt("scripts")} اسکریپت، ${p.optLong("views")} بازدید"
+                }.joinToString("\n")
+            } else {
+                "ناشران فعال زیادی داریم — اسکریپت‌های مدیران سایت همیشه تأییدشده هستند 👑"
+            }
+            return "فعال‌ترین ناشران سایت بر اساس لیست فعلی:\n\n$list\n\nبرای دیدن همه اسکریپت‌های یک ناشر، وارد صفحه پروفایلش شو."
+        }
+
+        if (low.contains("اکسپلویت") || low.contains("exploit") || low.contains("executor") || low.contains("wave") || low.contains("solara") || low.contains("delta") || low.contains("fluxus")) {
+            if (exploits.length() == 0) {
+                return "در حال حاضر لیست اکسپلویت‌ها در دسترس نیست، ولی می‌تونی صفحه «اکسپلویت‌ها» را باز کنی تا وضعیت آپدیت، درصد UNC/sUNC و شناسایی‌شده یا نشده بودن را ببینی."
+            }
+            val tokens = tokenize(q)
+            val scored = mutableListOf<Pair<JSONObject, Int>>()
+            for (i in 0 until exploits.length()) {
+                val e = exploits.optJSONObject(i) ?: continue
+                if (e.optBoolean("hidden", false)) continue
+                val hay = "${e.optString("title")} ${e.optString("platform")}".lowercase()
+                var sc = 0
+                for (t in tokens) if (hay.contains(t)) sc += 1
+                scored.add(e to sc)
+            }
+            val filtered = if (scored.any { it.second > 0 }) scored.filter { it.second > 0 }.sortedByDescending { it.second }.map { it.first } else (0 until exploits.length()).map { exploits.getJSONObject(it) }
+            val lines = filtered.take(8).map { e ->
+                val upd = if (e.optBoolean("updateStatus")) "✅ آپدیت‌شده" else "⚠️ آپدیت‌نشده"
+                val det = if (e.optBoolean("detected")) "🚨 شناسایی‌شده" else "🟢 شناسایی‌نشده"
+                val cost = if (e.optBoolean("free")) "رایگان" else "پولی"
+                "• **${e.optString("title")}** — ${e.optString("platform")} — $upd — $det — $cost"
+            }.joinToString("\n")
+            return "بر اساس داده‌های زنده، این اکسپلویت‌ها مرتبط هستند:\n\n$lines\n\nبرای جزئیات بیشتر به صفحه «اکسپلویت‌ها» سر بزن."
+        }
+
+        if (scripts.length() == 0) {
+            return "در حال حاضر لیست اسکریپت‌ها در دسترس نیست. لطفاً صفحه اصلی یا جستجو را باز کن."
+        }
+
+        if (low.contains("سلام") || low.length < 4) {
+            val pop = (0 until minOf(scripts.length(), 5)).map { i -> scripts.getJSONObject(i) }.mapIndexed { idx, s ->
+                val p = s.optJSONObject("profiles") ?: JSONObject()
+                val author = p.optString("display_name").ifBlank { p.optString("username").ifBlank { "ناشناس" } }
+                "${idx + 1}. **${s.optString("title")}** — بازی: ${s.optString("game_name").ifBlank { "عمومی" }} — ناشر: $author ${if (s.optBoolean("is_verified")) "✅" else ""}"
+            }.joinToString("\n")
+            return "سلام! 👋 من دستیار هوشمند Roblox Script هستم — به تمام اسکریپت‌ها، اکسپلویت‌ها و ناشران سایت دسترسی دارم.\n\n🔥 محبوب‌ترین‌ها:\n$pop\n\nبگو دنبال اسکریپت چه بازی هستی!"
+        }
+
+        val tokens = tokenize(q)
+        val scored = mutableListOf<Pair<JSONObject, Int>>()
+        for (i in 0 until scripts.length()) {
+            val s = scripts.optJSONObject(i) ?: continue
+            scored.add(s to scoreScript(s, tokens, q))
+        }
+        scored.sortByDescending { it.second }
+        val relevant = scored.filter { it.second > 0 }.take(6).map { it.first }
+        val toShow = if (relevant.isNotEmpty()) relevant else scored.take(6).map { it.first }
+
+        val out = toShow.mapIndexed { idx, s ->
+            val p = s.optJSONObject("profiles") ?: JSONObject()
+            val pName = p.optString("display_name").ifBlank { p.optString("username").ifBlank { "ناشناس" } }
+            val role = when (p.optString("role")) { "admin" -> "👑 مدیر سایت" else -> "👤 $pName" }
+            val ver = if (s.optBoolean("is_verified")) " ✅" else ""
+            "${idx + 1}. **${s.optString("title")}** — بازی: ${s.optString("game_name").ifBlank { "عمومی" }} — $role$ver — بازدید ${s.optLong("view_count")}"
+        }.joinToString("\n")
+
+        return if (relevant.isNotEmpty())
+            "برای «$q» این اسکریپت‌ها بیشترین تطابق را دارند:\n\n$out"
+        else
+            "چیزی دقیقاً برای «$q» پیدا نکردم، ولی این‌ها محبوب‌ترین‌های فعلی هستند:\n\n$out"
+    }
+
+    /** The full askHamyar pipeline (health -> rank -> answer -> retry -> text fallback -> local) */
     private fun askProviders(fullMessages: JSONArray, lastUserText: String): String? {
-        // TEXT-ONLY guard (server.js refuses image requests politely)
         if (wantsImage(lastUserText)) {
             return "من فقط متن تولید می‌کنم و قابلیت ساخت تصویر ندارم 🙏\nولی خوشحال می‌شم درباره اسکریپت‌ها یا اکسپلویت‌های سایت راهنماییت کنم!"
         }
@@ -397,12 +541,23 @@ class MainActivity : AppCompatActivity() {
         var ans = if (pool.length() > 0) tryAnswer(fullMessages, pool) else null
         if (ans != null) return ans
 
-        // None answered -> force a fresh full test and retry once
         pool = refreshPool(true)
         ans = if (pool.length() > 0) tryAnswer(fullMessages, pool) else null
         if (ans != null) return ans
 
-        return "در حال حاضر هیچ مدل هوش مصنوعی در دسترس نیست. کمی بعد دوباره امتحان کنید 🙏"
+        try {
+            val ctx = synchronized(lock) { aiContextCache?.second ?: "" }
+            val prompt = "${HAMYAR_SYSTEM_PROMPT}\n\n${ctx.take(3000)}\n\nUser: $lastUserText\nAssistant:"
+            val tf = callPollinationsTextFallback(prompt)
+            if (tf != null) return tf
+        } catch (e: Exception) {}
+
+        try {
+            val local = getLocalFallbackReply(lastUserText)
+            if (local != null) return local
+        } catch (e: Exception) {}
+
+        return "در حال حاضر ارتباط با مدل‌های هوش مصنوعی برقرار نشد، ولی داده‌های سایت در دسترسه — نام بازی یا اکسپلویت مورد نظرت را بگو تا از روی لیست زنده سایت راهنماییت کنم 🙏"
     }
 
     /** Builds the "live site data" context exactly like server.js buildAIContext(). */
@@ -425,18 +580,21 @@ class MainActivity : AppCompatActivity() {
                     .append(" | اندروید: ").append(j.optString("Android", "?"))
                     .append(" | iOS: ").append(j.optString("iOS", "?")).append("\n")
             }
-        } catch (e: Exception) { /* optional */ }
+        } catch (e: Exception) { }
 
-        // Top scripts + publisher aggregates (Supabase REST, like fetchTopScriptsForAI)
         var scriptsText = ""
         var publishersText = ""
+        var scriptsArrForCache = JSONArray()
+        var exploitsArrForCache = JSONArray()
+        var publishersArrForCache = JSONArray()
+
         try {
             val select = Uri.encode(
-                "title,game_name,features,tags,view_count,like_count,is_verified,author_id," +
+                "title,game_name,features,tags,view_count,like_count,is_verified,author_id,created_at," +
                     "profiles:author_id(display_name,username,role)"
             )
             val url = "$SUPABASE_URL/rest/v1/scripts?select=$select" +
-                "&status=eq.published&visibility=eq.public&order=view_count.desc&limit=40"
+                "&status=eq.published&visibility=eq.public&order=view_count.desc&limit=80"
             val body = getJson(
                 url,
                 mapOf("apikey" to SUPABASE_ANON_KEY, "Authorization" to "Bearer $SUPABASE_ANON_KEY"),
@@ -444,6 +602,7 @@ class MainActivity : AppCompatActivity() {
             )
             if (body != null) {
                 val arr = JSONArray(body)
+                scriptsArrForCache = arr
 
                 val lines = ArrayList<String>()
                 for (i in 0 until arr.length()) {
@@ -473,7 +632,6 @@ class MainActivity : AppCompatActivity() {
                 }
                 scriptsText = lines.joinToString("\n")
 
-                // Publisher aggregates
                 val pmap = LinkedHashMap<String, JSONObject>()
                 for (i in 0 until arr.length()) {
                     val s = arr.getJSONObject(i)
@@ -494,7 +652,7 @@ class MainActivity : AppCompatActivity() {
                 val pubs = pmap.values
                     .sortedWith(compareByDescending<JSONObject> { it.optInt("scripts") }
                         .thenByDescending { it.optLong("views") })
-                    .take(25)
+                    .take(30)
                 publishersText = pubs.joinToString("\n") { p ->
                     val uname = p.optString("username").let { if (it.isNotBlank()) " (@$it)" else "" }
                     val role = when (p.optString("role")) {
@@ -506,19 +664,20 @@ class MainActivity : AppCompatActivity() {
                         " (${p.optInt("verified")} تأییدشده) | مجموع بازدید: ${p.optLong("views")}" +
                         " | مجموع لایک: ${p.optLong("likes")}"
                 }
+                for (p in pubs) publishersArrForCache.put(p)
             }
-        } catch (e: Exception) { /* context still usable without scripts */ }
+        } catch (e: Exception) { }
 
-        sb.append("\n--- اسکریپت‌های محبوب سایت (تا ۴۰ مورد) ---\n")
+        sb.append("\n--- اسکریپت‌های محبوب سایت (تا ۸۰ مورد) ---\n")
             .append(if (scriptsText.isNotBlank()) scriptsText else "(فعلاً اسکریپتی ثبت نشده)")
         sb.append("\n\n--- ناشران (پابلیشرهای) فعال سایت — آمار بر اساس همین لیست محبوب ---\n")
             .append(if (publishersText.isNotBlank()) publishersText else "(اطلاعات ناشران در دسترس نیست)")
 
-        // Exploit statuses
         try {
             val ex = fetchWeaoRaw("/api/status/exploits")
             if (ex != null) {
                 val arr = JSONArray(ex)
+                exploitsArrForCache = arr
                 val lines = ArrayList<String>()
                 for (i in 0 until arr.length()) {
                     val e = arr.getJSONObject(i)
@@ -542,18 +701,20 @@ class MainActivity : AppCompatActivity() {
             } else {
                 sb.append("\n\n--- وضعیت اکسپلویت‌ها (منبع: WEAO) ---\n(اطلاعات اکسپلویت‌ها در دسترس نیست)")
             }
-        } catch (e: Exception) { /* optional */ }
+        } catch (e: Exception) { }
 
         val text = sb.toString()
-        synchronized(lock) { aiContextCache = System.currentTimeMillis() to text }
+        synchronized(lock) {
+            aiContextCache = System.currentTimeMillis() to text
+            aiCachedScripts = scriptsArrForCache
+            aiCachedExploits = exploitsArrForCache
+            aiCachedPublishers = publishersArrForCache
+        }
         return text
     }
 
-    // ──────────────────────────────────────────────────────────────────────────
-    // HTTP helpers
-    // ──────────────────────────────────────────────────────────────────────────
 
-    private fun getJson(urlString: String, headers: Map<String, String>, timeoutMs: Int): String? {
+        private fun getJson(urlString: String, headers: Map<String, String>, timeoutMs: Int): String? {
         return try {
             val conn = URL(urlString).openConnection() as HttpURLConnection
             try {

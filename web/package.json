@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite --host 0.0.0.0 --port 3000",
+    "dev": "vite --host 0.0.0.0 --port 5173",
+    "dev:api": "node server.js",
+    "dev:all": "npm run dev:api & vite --host 0.0.0.0 --port 5173",
     "build": "tsc && vite build",
     "build:apk": "npm run build && node scripts/inline.mjs",
     "preview": "vite preview --host 0.0.0.0 --port 3000",
